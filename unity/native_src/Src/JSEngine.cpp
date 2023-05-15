@@ -90,13 +90,13 @@ namespace puerts
                 printf("InitializeNodeWithArgs failed\n");
             }
         }
-        std::string Flags = "";
-#if PUERTS_DEBUG
+        std::string Flags = "--stack_size=856";
+
         Flags += "--expose-gc";
 #if PLATFORM_MAC
         Flags += " --jitless --no-expose-wasm";
 #endif
-#endif
+
 #if PLATFORM_IOS
         Flags += " --jitless --no-expose-wasm";
 #endif
@@ -185,12 +185,12 @@ namespace puerts
         }
 
         std::string Flags = "--no-harmony-top-level-await --stack_size=856";
-#if PUERTS_DEBUG
+
         Flags += " --expose-gc";
 #if PLATFORM_MAC
         Flags += " --jitless --no-expose-wasm";
 #endif
-#endif
+
 #if PLATFORM_IOS
         Flags += " --jitless --no-expose-wasm";
 #endif
