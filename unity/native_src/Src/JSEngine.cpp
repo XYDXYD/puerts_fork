@@ -90,7 +90,7 @@ namespace puerts
                 printf("InitializeNodeWithArgs failed\n");
             }
         }
-        std::string Flags = "";
+        std::string Flags = "--stack_size=856";
 
         Flags += "--expose-gc";
         Flags += " --max-semi-space-size=4";
