@@ -1,19 +1,28 @@
-# 生成过滤器 - Filter
+# the Filter of Generator
+当你生成wrapper时遇到以下问题时，就可以参考这段文档：
+1. 某些成员生成之后会引发编译错误，需要过滤掉不生成
+2. 权限控制。希望某些成员不允许JS访问。
 
-### Filter是干嘛的
-在生成StaticWrappe  r时，你会发现生成列表的指定是以`类`为维度的。但实际开发中总是会遇到`某些函数不需要被生成wrapper`的需求，这时候Filter就派上了用场
+## What is Filter used for
+PuerTS provides a series of generation control capabilities, and by configuring a Filter function to perform a small amount of customization on the StaticWrapper, the above requirements can be achieved.
 
-你可以如下编写一个Filter
+Below, some example will be used to illustrate.
+
+## Filtering interfaces that throw compile errors
+When generating a StaticWrapper, you will find that the generation list is specified by **class**. However, in actual development, there is always a need to **exclude certain functions from being generated as wrappers**. This is where filters come in.
+
+You can write a filter as follows:
+
 ```csharp
-//1、配置类必须打[Configure]标签
-//2、必须放Editor目录
+//1. The configuration class must be tagged with [Configure].
+//2. It must be placed in the Editor directory.
 [Configure]
 public class ExamplesCfg
 {
     [Filter]
     static bool FilterMethods(System.Reflection.MemberInfo mb)
     {
-        // 排除 MonoBehaviour.runInEditMode, 在 Editor 环境下可用发布后不存在
+        // Exclude MonoBehaviour.runInEditMode, which is only available in the Editor environment and does not exist after publication.
         if (mb.DeclaringType == typeof(MonoBehaviour) && mb.Name == "runInEditMode") {
             return true;
         }
@@ -21,9 +30,51 @@ public class ExamplesCfg
     }
 }
 ```
---------
-### 经典使用场景
+## access control
 
-由于生成`StaticWrapper`的程序是运行在Editor的，因此PuerTS在执行的反射时候，会把Editor专有的接口生成到`StaticWrapper`里，并在后续游戏打包时报错。
+First, If you want to disable some C# feature, disallowing to use them in Javascript, you can write filter like this:
+```C#
+static Puerts.Editor.Generator.BindingMode FilterMethods(System.Reflection.MemberInfo mb)
+{
+    if (memberInfo.DeclaringType.ToString() == "System.Threading.Tasks.Task" && memberInfo.Name == "IsCompletedSuccessfully")
+    {
+        return Puerts.Editor.Generator.BindingMode.DontBinding; // 不生成StaticWrapper，且JS调用时获取对应字段会得到undefined。
+    }
+    return Puerts.Editor.Generator.BindingMode.FastBinding; // 等同于前面return false的情况
+}
+```
+In the above situation, PuerTS will record information about these properties in the Wrapper, so when registering these properties, they will be prevented from being called.
 
-这时候就需要用Filter对这些接口进行处理。
+However, if you want to disable most JS calls and only allow a few interfaces to be callable, it is not feasible to generate a wrapper for all properties and mark them as unavailable.
+
+In this case, you can use this C# call to disable default JS calls:
+
+```C#
+var env = new JsEnv();
+env.SetDefaultBindingMode(BindingMode.DontBinding)
+```
+Then return `BindingMode.FastBinding` or `BindingMode.SlowBinding` to allow them to be invoked.
+```C#
+static Puerts.Editor.Generator.BindingMode FilterMethods(System.Reflection.MemberInfo mb)
+{
+    if (memberInfo.DeclaringType == typeof(UnityEngine.Vector3)) // 使vector3可用
+    {
+        return Puerts.Editor.Generator.BindingMode.FastBinding;
+    }
+    return Puerts.Editor.Generator.BindingMode.DontBinding;
+}
+```
+
+# Filtering in xIl2cpp Mode
+In xIl2cpp mode, the default cppwrapper generation is fully generation. Therefore, it will try to obtain the method body to search for types.
+
+If you want to exclude certain types from this operation, you can use this method to filter them out.
+```C#
+[Filter]
+static bool GetFilterClass(FilterAction filterAction, MemberInfo mbi)
+{
+    if (filterAction == FilterAction.MethodInInstructions) 
+        return skipAssembles.Contains(mbi.DeclaringType.Assembly.GetName().Name);
+    return false;
+}
+```

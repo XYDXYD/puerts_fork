@@ -106,6 +106,9 @@ var global = global || (function () { return this; }());
             }
             
             let [fullPath, debugPath] = moduleInfo;
+            if(debugPath.startsWith("Pak: ")){
+                debugPath = fullPath
+            }
             
             let key = fullPath;
             if ((key in moduleCache) && !forceReload) {
@@ -118,17 +121,35 @@ var global = global || (function () { return this; }());
             let sid = addModule(m);
             let script = loadModule(fullPath);
             isESM = isESM === true || fullPath.endsWith(".mjs")
-            if (fullPath.endsWith(".cjs")) isESM = false;
+            let cachedIsESM = isESM;
+            if (fullPath.endsWith(".cjs")) {
+                isESM = true;
+                cachedIsESM = false;
+            }
             if (fullPath.endsWith(".json")) {
                 let packageConfigure = JSON.parse(script);
                 
-                if (fullPath.endsWith("package.json") && packageConfigure.main) {
+                if (fullPath.endsWith("package.json")) {
                     isESM = packageConfigure.type === "module"
+                    let url = packageConfigure.main || "index.js";
+                    if (isESM) {
+                        let packageExports = packageConfigure.exports && packageConfigure.exports["."];
+                        if (packageExports)
+                            url =
+                                (packageExports["default"] && packageExports["default"]["require"]) ||
+                                (packageExports["require"] && packageExports["require"]["default"]) ||
+                                packageExports["require"];                        
+                        if (!url) {
+                            throw new Error("can not require a esm in cjs module!");
+                        }
+                        isESM = cachedIsESM;
+                    }
                     let fullDirInJs = (fullPath.indexOf('/') != -1) ? fullPath.substring(0, fullPath.lastIndexOf("/")) : fullPath.substring(0, fullPath.lastIndexOf("\\")).replace(/\\/g, '\\\\');
                     let tmpRequire = genRequire(fullDirInJs, isESM);
-                    let r = tmpRequire(packageConfigure.main);
+                    let r = tmpRequire(url);
                     tmpModuleStorage[sid] = undefined;
                     m.exports = r;
+                    isESM = cachedIsESM;
                 } else {
                     tmpModuleStorage[sid] = undefined;
                     m.exports = packageConfigure;

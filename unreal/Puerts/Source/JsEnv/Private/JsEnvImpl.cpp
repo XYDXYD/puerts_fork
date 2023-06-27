@@ -39,6 +39,9 @@
 #pragma warning(pop)
 
 #include "V8InspectorImpl.h"
+#if USE_WASM3
+#include "WasmModuleInstance.h"
+#endif
 
 #if !defined(WITH_NODEJS)
 
@@ -97,6 +100,10 @@
 
 #if !defined(ENGINE_INDEPENDENT_JSENV)
 #include "Engine/CollisionProfile.h"
+#endif
+
+#if USE_WASM3
+#include "PuertsWasm/WasmJsFunctionParams.h"
 #endif
 
 namespace puerts
@@ -359,6 +366,11 @@ FJsEnvImpl::FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::sha
     v8::V8::SetFlagsFromString(Flags, sizeof(Flags));
 #endif
 
+#ifdef WITH_V8_FAST_CALL
+    char FCFlags[] = "--turbo-fast-api-calls";
+    v8::V8::SetFlagsFromString(FCFlags, sizeof(FCFlags));
+#endif
+
     // char GCFlags[] = "--expose-gc";
     // v8::V8::SetFlagsFromString(GCFlags, sizeof(GCFlags));
 
@@ -542,6 +554,18 @@ FJsEnvImpl::FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::sha
     MethodBindingHelper<&FJsEnvImpl::ClearInterval>::Bind(Isolate, Context, Global, "clearInterval", This);
     //#endif
 
+#if USE_WASM3
+    MethodBindingHelper<&FJsEnvImpl::Wasm_NewMemory>::Bind(Isolate, Context, Global, "__tgjsWasm_NewMemory", This);
+    MethodBindingHelper<&FJsEnvImpl::Wasm_MemoryGrowth>::Bind(Isolate, Context, Global, "__tgjsWasm_MemoryGrowth", This);
+    MethodBindingHelper<&FJsEnvImpl::Wasm_MemoryBuffer>::Bind(Isolate, Context, Global, "__tgjsWasm_MemoryBuffer", This);
+    MethodBindingHelper<&FJsEnvImpl::Wasm_TableGrowth>::Bind(Isolate, Context, Global, "__tgjsWasm_TableGrow", This);
+    MethodBindingHelper<&FJsEnvImpl::Wasm_TableSet>::Bind(Isolate, Context, Global, "__tgjsWasm_TableSet", This);
+    MethodBindingHelper<&FJsEnvImpl::Wasm_TableLen>::Bind(Isolate, Context, Global, "__tgjsWasm_TableLen", This);
+    MethodBindingHelper<&FJsEnvImpl::Wasm_Instance>::Bind(Isolate, Context, Global, "__tgjsWasm_Instance", This);
+    MethodBindingHelper<&FJsEnvImpl::Wasm_OverrideWebAssembly>::Bind(
+        Isolate, Context, Global, "__tgjsWasm_OverrideWebAssembly", This);
+#endif
+
     MethodBindingHelper<&FJsEnvImpl::DumpStatisticsLog>::Bind(Isolate, Context, Global, "dumpStatisticsLog", This);
 
     Global
@@ -606,6 +630,10 @@ FJsEnvImpl::FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::sha
         Isolate, PuertsObj->Get(Context, FV8Utils::ToV8String(Isolate, "getESMMain")).ToLocalChecked().As<v8::Function>());
 
     ReloadJs.Reset(Isolate, PuertsObj->Get(Context, FV8Utils::ToV8String(Isolate, "__reload")).ToLocalChecked().As<v8::Function>());
+#if !PUERTS_FORCE_CPP_UFUNCTION
+    MergePrototype.Reset(
+        Isolate, PuertsObj->Get(Context, FV8Utils::ToV8String(Isolate, "__mergePrototype")).ToLocalChecked().As<v8::Function>());
+#endif
 
     DelegateProxiesCheckerHandler =
         FUETicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateRaw(this, &FJsEnvImpl::CheckDelegateProxies), 1);
@@ -618,11 +646,29 @@ FJsEnvImpl::FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::sha
 #ifdef SINGLE_THREAD_VERIFY
     BoundThreadId = FPlatformTLS::GetCurrentThreadId();
 #endif
+
+#if USE_WASM3
+    PuertsWasmEnv = std::make_shared<WasmEnv>();
+    //创建默认的runtime
+    PuertsWasmRuntimeList.Add(std::make_shared<WasmRuntime>(PuertsWasmEnv.get()));
+    ExecuteModule("puerts/wasm3_helper.js");
+#endif
 }
 
 // #lizard forgives
 FJsEnvImpl::~FJsEnvImpl()
 {
+#if USE_WASM3
+    PuertsWasmRuntimeList.Empty();
+    PuertsWasmEnv.reset();
+    for (auto Item : PuertsWasmCachedLinkFunctionList)
+    {
+        Item->CachedFunction.Reset();
+        delete Item;
+    }
+    PuertsWasmCachedLinkFunctionList.Empty();
+#endif
+
 #ifdef SINGLE_THREAD_VERIFY
     ensureMsgf(BoundThreadId == FPlatformTLS::GetCurrentThreadId(), TEXT("Access by illegal thread!"));
 #endif
@@ -769,6 +815,9 @@ FJsEnvImpl::~FJsEnvImpl()
         MapTemplate.Reset();
         SetTemplate.Reset();
         ArrayTemplate.Reset();
+#if !PUERTS_FORCE_CPP_UFUNCTION
+        MergePrototype.Reset();
+#endif
     }
 
 #if !defined(ENGINE_INDEPENDENT_JSENV)
@@ -1175,6 +1224,10 @@ void FJsEnvImpl::MakeSureInject(UTypeScriptGeneratedClass* TypeScriptGeneratedCl
                         // implement by js
                         TypeScriptGeneratedClass->FunctionToRedirect.Empty();
 
+#if !PUERTS_FORCE_CPP_UFUNCTION
+                        auto NetMethods = v8::Object::New(Isolate);
+#endif
+
                         for (TFieldIterator<UFunction> It(TypeScriptGeneratedClass, EFieldIteratorFlags::ExcludeSuper,
                                  EFieldIteratorFlags::ExcludeDeprecated, EFieldIteratorFlags::ExcludeInterfaces);
                              It; ++It)
@@ -1231,11 +1284,20 @@ void FJsEnvImpl::MakeSureInject(UTypeScriptGeneratedClass* TypeScriptGeneratedCl
                                         FuncInfo->JsFunction = v8::UniquePersistent<v8::Function>(
                                             Isolate, v8::Local<v8::Function>::Cast(MaybeValue.ToLocalChecked()));
                                     }
+
+#if !PUERTS_FORCE_CPP_UFUNCTION
+                                    if (Function->HasAnyFunctionFlags(FUNC_Net))
+                                    {
+                                        __USE(NetMethods->Set(Context, V8Name, v8::True(Isolate)));
+                                    }
+#endif
+
                                     TypeScriptGeneratedClass->FunctionToRedirect.Add(FunctionFName);
                                     TypeScriptGeneratedClass->RedirectToTypeScript(Function);
                                 }
                             }
                         }
+                        TypeScriptGeneratedClass->RedirectedToTypeScript = true;
 #if WITH_EDITOR
                         TypeScriptGeneratedClass->FunctionToRedirectInitialized = true;
 #endif
@@ -1258,6 +1320,12 @@ void FJsEnvImpl::MakeSureInject(UTypeScriptGeneratedClass* TypeScriptGeneratedCl
                                 __USE(Proto->SetPrototype(Context, NativeProto->GetPrototype()));
                             }
                             __USE(NativeProto->SetPrototype(Context, Proto));
+
+#if !PUERTS_FORCE_CPP_UFUNCTION
+                            v8::Local<v8::Value> MergeArgs[] = {Proto, NativeProto, NetMethods};
+
+                            __USE(MergePrototype.Get(Isolate)->Call(Context, v8::Undefined(Isolate), 3, MergeArgs));
+#endif
                         }
                         else
                         {
@@ -1277,7 +1345,7 @@ void FJsEnvImpl::MakeSureInject(UTypeScriptGeneratedClass* TypeScriptGeneratedCl
                                 //执行的话，对CreateDefaultSubobject这类UE逻辑又不允许执行多次（会崩溃），两者相较取其轻
                                 //后面看是否能参照蓝图的组件初始化进行改造
                                 // TsConstruct(TypeScriptGeneratedClass, Object);
-                                __USE(FindOrAdd(Isolate, Context, Object->GetClass(), Object));
+                                __USE(FindOrAdd(Isolate, Context, Object->GetClass(), Object, true));
                             }
                         }
 
@@ -1554,7 +1622,7 @@ FString FJsEnvImpl::CurrentStackTrace()
 #endif
 }
 
-bool FJsEnvImpl::IsNativeTakeJsRef(UClass* Class)
+bool FJsEnvImpl::IsTypeScriptGeneratedClass(UClass* Class)
 {
     while (Class)
     {
@@ -1614,7 +1682,8 @@ void FJsEnvImpl::UnBind(UClass* Class, UObject* UEObject)
     UnBind(Class, UEObject, false);
 }
 
-v8::Local<v8::Value> FJsEnvImpl::FindOrAdd(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, UClass* Class, UObject* UEObject)
+v8::Local<v8::Value> FJsEnvImpl::FindOrAdd(
+    v8::Isolate* Isolate, v8::Local<v8::Context>& Context, UClass* Class, UObject* UEObject, bool SkipTypeScriptInitial)
 {
     if (!UEObject)
     {
@@ -1627,13 +1696,23 @@ v8::Local<v8::Value> FJsEnvImpl::FindOrAdd(v8::Isolate* Isolate, v8::Local<v8::C
         bool Existed;
         auto TemplateInfoPtr = GetTemplateInfoOfType(Class, Existed);
         auto Result = TemplateInfoPtr->Template.Get(Isolate)->InstanceTemplate()->NewInstance(Context).ToLocalChecked();
-        Bind(static_cast<FClassWrapper*>(TemplateInfoPtr->StructWrapper.get()), UEObject, Result);
+        auto ClassWrapper = static_cast<FClassWrapper*>(TemplateInfoPtr->StructWrapper.get());
+        Bind(ClassWrapper, UEObject, Result);
+        if (!SkipTypeScriptInitial && ClassWrapper->IsTypeScriptGeneratedClass)
+        {
+            TypeScriptInitial(UEObject->GetClass(), UEObject);
+        }
         return Result;
     }
     else
     {
         return v8::Local<v8::Value>::New(Isolate, *PersistentValuePtr);
     }
+}
+
+v8::Local<v8::Value> FJsEnvImpl::FindOrAdd(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, UClass* Class, UObject* UEObject)
+{
+    return FindOrAdd(Isolate, Context, Class, UEObject, false);
 }
 
 v8::Local<v8::Value> FJsEnvImpl::FindOrAddStruct(
@@ -1879,7 +1958,7 @@ void FJsEnvImpl::TsConstruct(UTypeScriptGeneratedClass* Class, UObject* Object)
         auto PersistentValuePtr = ObjectMap.Find(Object);
         if (!PersistentValuePtr)
         {
-            JSObject = FindOrAdd(Isolate, Context, Object->GetClass(), Object)->ToObject(Context).ToLocalChecked();
+            JSObject = FindOrAdd(Isolate, Context, Object->GetClass(), Object, true)->ToObject(Context).ToLocalChecked();
 
             // FindOrAdd may change BindInfoMap, cause a rehash
             BindInfoPtr = BindInfoMap.Find(Class);
@@ -2063,6 +2142,19 @@ void FJsEnvImpl::InvokeMixinMethod(UObject* ContextObject, UJSGeneratedFunction*
     }
 }
 
+void FJsEnvImpl::TypeScriptInitial(UClass* Class, UObject* Object, const bool TypeScriptClassFound)
+{
+    if (auto TypeScriptGeneratedClass = Cast<UTypeScriptGeneratedClass>(Class))
+    {
+        TypeScriptInitial(Class->GetSuperClass(), Object, true);
+        TsConstruct(TypeScriptGeneratedClass, Object);
+    }
+    else if (!TypeScriptClassFound)
+    {
+        TypeScriptInitial(Class->GetSuperClass(), Object, false);
+    }
+}
+
 void FJsEnvImpl::InvokeTsMethod(UObject* ContextObject, UFunction* Function, FFrame& Stack, void* RESULT_PARAM)
 {
 #ifdef SINGLE_THREAD_VERIFY
@@ -2074,12 +2166,19 @@ void FJsEnvImpl::InvokeTsMethod(UObject* ContextObject, UFunction* Function, FFr
     auto FuncInfo = TsFunctionMap.Find(Function);
     if (!FuncInfo)
     {
-        Logger->Error(FString::Printf(TEXT("call %s::%s of %p fail: can not find Binded JavaScript Function"),
-            *ContextObject->GetClass()->GetName(), *Function->GetName(), ContextObject));
-        SkipFunction(Stack, RESULT_PARAM, Function);
-        return;
+        auto Class = Cast<UTypeScriptGeneratedClass>(Function->GetOuterUClassUnchecked());
+        MakeSureInject(Class, true, false);
+        FinishInjection(Class);
+        FuncInfo = TsFunctionMap.Find(Function);
+        if (!FuncInfo)
+        {
+            Logger->Error(FString::Printf(TEXT("call %s::%s of %p fail: can not find Binded JavaScript Function"),
+                *ContextObject->GetClass()->GetName(), *Function->GetName(), ContextObject));
+            SkipFunction(Stack, RESULT_PARAM, Function);
+            return;
+        }
     }
-    else
+
     {
         auto Isolate = MainIsolate;
         v8::Isolate::Scope IsolateScope(Isolate);
@@ -2091,15 +2190,7 @@ void FJsEnvImpl::InvokeTsMethod(UObject* ContextObject, UFunction* Function, FFr
 
         if (!Function->HasAnyFunctionFlags(FUNC_Static))
         {
-            const auto PersistentValuePtr = ObjectMap.Find(ContextObject);
-            if (!PersistentValuePtr)
-            {
-                Logger->Error(FString::Printf(TEXT("call %s::%s of %p fail: can not find Binded JavaScript Object"),
-                    *ContextObject->GetClass()->GetName(), *Function->GetName(), ContextObject));
-                SkipFunction(Stack, RESULT_PARAM, Function);
-                return;
-            }
-            ThisObj = PersistentValuePtr->Get(Isolate);
+            ThisObj = FindOrAdd(Isolate, Context, ContextObject->GetClass(), ContextObject);
         }
 
         v8::TryCatch TryCatch(Isolate);
@@ -2121,17 +2212,10 @@ void FJsEnvImpl::NotifyReBind(UTypeScriptGeneratedClass* Class)
 #ifdef THREAD_SAFE
     v8::Locker Locker(Isolate);
 #endif
-    if (Class->IsChildOf(UBlueprintFunctionLibrary::StaticClass()))
-    {
-        MakeSureInject(Class, false, false);
-        FinishInjection(Class);
-        return;
-    }
-
-#if WITH_EDITOR
     MakeSureInject(Class, false, false);
     FinishInjection(Class);
 
+#if WITH_EDITOR
     while (UTypeScriptGeneratedClass* SuperCls = Cast<UTypeScriptGeneratedClass>(Class->GetSuperClass()))
     {
         Class = SuperCls;
@@ -2149,7 +2233,20 @@ void FJsEnvImpl::NotifyReBind(UTypeScriptGeneratedClass* Class)
                 continue;
             if (Object->GetClass()->GetName().StartsWith(TEXT("REINST_")))
                 continue;    //跳过父类重新编译后临时状态的对象
-            __USE(FindOrAdd(Isolate, Context, Object->GetClass(), Object));
+            __USE(FindOrAdd(Isolate, Context, Object->GetClass(), Object, true));
+
+            UTypeScriptGeneratedClass* ClassMayNeedReBind = nullptr;
+            auto TempClass = Object->GetClass();
+
+            while (TempClass && (TempClass != Class) && (!ClassMayNeedReBind))
+            {
+                ClassMayNeedReBind = Cast<UTypeScriptGeneratedClass>(TempClass);
+                TempClass = TempClass->GetSuperClass();
+            }
+            if (ClassMayNeedReBind)
+            {
+                MakeSureInject(ClassMayNeedReBind, false, false);
+            }
         }
     }
 #endif
@@ -2715,7 +2812,6 @@ FJsEnvImpl::FTemplateInfo* FJsEnvImpl::GetTemplateInfoOfType(UStruct* InStruct, 
         {
             InitExtensionMethodsMap();
         }
-        v8::EscapableHandleScope HandleScope(Isolate);
         v8::Local<v8::FunctionTemplate> Template;
 
         bool IsReuseTemplate = false;
@@ -2778,7 +2874,7 @@ FJsEnvImpl::FTemplateInfo* FJsEnvImpl::GetTemplateInfoOfType(UStruct* InStruct, 
 #endif
             }
 
-            StructWrapper->IsNativeTakeJsRef = IsNativeTakeJsRef(Class);
+            StructWrapper->IsNativeTakeJsRef = StructWrapper->IsTypeScriptGeneratedClass = IsTypeScriptGeneratedClass(Class);
 
             auto SuperClass = Class->GetSuperClass();
             if (SuperClass)
@@ -2832,8 +2928,21 @@ v8::Local<v8::Function> FJsEnvImpl::GetJsClass(UStruct* InStruct, v8::Local<v8::
 
 bool FJsEnvImpl::IsInstanceOf(UStruct* Struct, v8::Local<v8::Object> JsObject)
 {
-    bool Dummy;
-    return GetTemplateInfoOfType(Struct, Dummy)->Template.Get(MainIsolate)->HasInstance(JsObject);
+    //这里如果外面传一个非uobject或者ustructsrcipt的object,可能会有问题
+    if (Cast<UScriptStruct>(Struct))
+    {
+        UScriptStruct* ObjectStruct = (UScriptStruct*) FV8Utils::GetPointer(JsObject, 1);
+        return ObjectStruct && ObjectStruct->IsChildOf(Struct);
+    }
+    else
+    {
+        UObject* Object = FV8Utils::GetUObject(JsObject);
+        if (!Object || Object == RELEASED_UOBJECT)
+        {
+            return false;
+        }
+        return Object->GetClass()->IsChildOf(Struct);
+    }
 }
 
 bool FJsEnvImpl::IsInstanceOfCppObject(const void* TypeId, v8::Local<v8::Object> JsObject)
@@ -2956,17 +3065,16 @@ void FJsEnvImpl::LoadUEType(const v8::FunctionCallbackInfo<v8::Value>& Info)
 
     const FString TypeName = FV8Utils::ToFString(Isolate, Info[0]);
 
-    UObject* ClassPackage = ANY_PACKAGE;
-    UField* Type = FindObject<UClass>(ClassPackage, *TypeName);
+    UField* Type = FindAnyType<UClass>(TypeName);
 
     if (!Type)
     {
-        Type = FindObject<UScriptStruct>(ClassPackage, *TypeName);
+        Type = FindAnyType<UScriptStruct>(TypeName);
     }
 
     if (!Type)
     {
-        Type = FindObject<UEnum>(ClassPackage, *TypeName);
+        Type = FindAnyType<UEnum>(TypeName);
     }
 
     if (!Type)
@@ -3812,14 +3920,12 @@ void FJsEnvImpl::MakeUClass(const v8::FunctionCallbackInfo<v8::Value>& Info)
         return;
     }
 
-    UObject* ClassPackage = ANY_PACKAGE;
-
     FString GenClassName;
     int i = 0;
     while (true)
     {
         GenClassName = FString::Printf(TEXT("%s%d"), *ClassName, i);
-        if (!FindObject<UClass>(ClassPackage, *GenClassName))
+        if (!FindAnyType<UClass>(GenClassName))
             break;
         i++;
     }
@@ -4132,4 +4238,249 @@ void FJsEnvImpl::DumpStatisticsLog(const v8::FunctionCallbackInfo<v8::Value>& In
     Logger->Info(StatisticsLog);
 #endif    // !WITH_QUICKJS
 }
+
+#if USE_WASM3
+void FJsEnvImpl::Wasm_NewMemory(const v8::FunctionCallbackInfo<v8::Value>& Info)
+{
+    v8::Isolate* Isolate = Info.GetIsolate();
+    v8::Isolate::Scope IsolateScope(Isolate);
+    v8::HandleScope HandleScope(Isolate);
+    v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
+    v8::Context::Scope ContextScope(Context);
+
+    CHECK_V8_ARGS(EArgInt32, EArgInt32);
+
+    int InitPages = Info[0]->Int32Value(Context).ToChecked();
+    int MaxPages = Info[1]->Int32Value(Context).ToChecked();
+    check(InitPages >= 0 && MaxPages > 0 && MaxPages >= InitPages);
+    auto Runtime = std::make_shared<WasmRuntime>(PuertsWasmEnv.get(), MaxPages, InitPages);
+    PuertsWasmRuntimeList.Add(Runtime);
+    Info.GetReturnValue().Set(Runtime->GetRuntimeSeq());
+}
+
+void FJsEnvImpl::Wasm_MemoryGrowth(const v8::FunctionCallbackInfo<v8::Value>& Info)
+{
+    v8::Isolate* Isolate = Info.GetIsolate();
+    v8::Isolate::Scope IsolateScope(Isolate);
+    v8::HandleScope HandleScope(Isolate);
+    v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
+    v8::Context::Scope ContextScope(Context);
+
+    CHECK_V8_ARGS(EArgInt32, EArgInt32);
+
+    int Seq = Info[0]->Int32Value(Context).ToChecked();
+    int n = Info[1]->Int32Value(Context).ToChecked();
+    for (auto Runtime : PuertsWasmRuntimeList)
+    {
+        if (Runtime->GetRuntimeSeq() == Seq)
+        {
+            int previous = Runtime->Grow(n);
+            Info.GetReturnValue().Set(previous);
+            return;
+        }
+    }
+
+    FV8Utils::ThrowException(Isolate, "can not find associated runtime with memory");
+    return;
+}
+
+void FJsEnvImpl::Wasm_MemoryBuffer(const v8::FunctionCallbackInfo<v8::Value>& Info)
+{
+    v8::Isolate* Isolate = Info.GetIsolate();
+    v8::Isolate::Scope IsolateScope(Isolate);
+    v8::HandleScope HandleScope(Isolate);
+    v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
+    v8::Context::Scope ContextScope(Context);
+
+    CHECK_V8_ARGS(EArgInt32);
+
+    int Seq = Info[0]->Int32Value(Context).ToChecked();
+    for (auto Runtime : PuertsWasmRuntimeList)
+    {
+        if (Runtime->GetRuntimeSeq() == Seq)
+        {
+            int Length = 0;
+            uint8* Ptr = Runtime->GetBuffer(Length);
+            if (Ptr)
+            {
+#if defined(HAS_ARRAYBUFFER_NEW_WITHOUT_STL)
+                auto Buffer = v8::ArrayBuffer_New_Without_Stl(Isolate, Ptr, Length);
+#else
+                auto Buffer = v8::ArrayBuffer::New(Isolate, Ptr, Length, v8::ArrayBufferCreationMode::kExternalized);
+#endif
+                Info.GetReturnValue().Set(Buffer);
+            }
+            else
+            {
+                FV8Utils::ThrowException(Isolate, "no memory?");
+            }
+            return;
+        }
+    }
+    FV8Utils::ThrowException(Isolate, "can not find associated runtime with memory");
+    return;
+}
+
+void FJsEnvImpl::Wasm_TableGrowth(const v8::FunctionCallbackInfo<v8::Value>& Info)
+{
+    v8::Isolate* Isolate = Info.GetIsolate();
+    v8::Isolate::Scope IsolateScope(Isolate);
+    v8::HandleScope HandleScope(Isolate);
+    v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
+    v8::Context::Scope ContextScope(Context);
+
+    CHECK_V8_ARGS(EArgInt32, EArgInt32, EArgInt32);
+
+    int Seq = Info[0]->Int32Value(Context).ToChecked();
+    int Index = Info[1]->Int32Value(Context).ToChecked();
+    int N = Info[2]->Int32Value(Context).ToChecked();
+    for (auto Runtime : PuertsWasmRuntimeList)
+    {
+        if (Runtime->GetRuntimeSeq() == Seq)
+        {
+            if (auto ModuleInstance = Runtime->GetModuleInstance(Index))
+            {
+                Info.GetReturnValue().Set(static_cast<uint32_t>(ModuleInstance->TableGrow(N)));
+            }
+            else
+            {
+                FV8Utils::ThrowException(Isolate, "invalid Module Instance index");
+            }
+            return;
+        }
+    }
+
+    FV8Utils::ThrowException(Isolate, "can not find associated runtime with memory");
+}
+
+void FJsEnvImpl::Wasm_TableSet(const v8::FunctionCallbackInfo<v8::Value>& Info)
+{
+    v8::Isolate* Isolate = Info.GetIsolate();
+    v8::Isolate::Scope IsolateScope(Isolate);
+    v8::HandleScope HandleScope(Isolate);
+    v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
+    v8::Context::Scope ContextScope(Context);
+
+    CHECK_V8_ARGS(EArgInt32, EArgInt32, EArgInt32, EArgFunction);
+
+    int Seq = Info[0]->Int32Value(Context).ToChecked();
+    int Index = Info[1]->Int32Value(Context).ToChecked();
+    int Pos = Info[2]->Int32Value(Context).ToChecked();
+    auto Func = v8::Local<v8::Function>::Cast(Info[3]);
+
+    v8::Local<v8::Value> FuncData;
+
+    if (!Func->Get(Context, FV8Utils::ToV8String(Isolate, M3_FUNCTION_KEY)).ToLocal(&FuncData) || !FuncData->IsExternal())
+    {
+        FV8Utils::ThrowException(Isolate, "Argument 1 must be null or a WebAssembly function of type compatible to 'this'");
+        return;
+    }
+
+    for (auto Runtime : PuertsWasmRuntimeList)
+    {
+        if (Runtime->GetRuntimeSeq() == Seq)
+        {
+            if (auto ModuleInstance = Runtime->GetModuleInstance(Index))
+            {
+                ModuleInstance->TableSet(Pos, static_cast<IM3Function>(v8::Local<v8::External>::Cast(FuncData)->Value()));
+            }
+            else
+            {
+                FV8Utils::ThrowException(Isolate, "invalid Module Instance index");
+            }
+            return;
+        }
+    }
+
+    FV8Utils::ThrowException(Isolate, "can not find associated runtime with memory");
+}
+
+void FJsEnvImpl::Wasm_TableLen(const v8::FunctionCallbackInfo<v8::Value>& Info)
+{
+    v8::Isolate* Isolate = Info.GetIsolate();
+    v8::Isolate::Scope IsolateScope(Isolate);
+    v8::HandleScope HandleScope(Isolate);
+    v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
+    v8::Context::Scope ContextScope(Context);
+
+    CHECK_V8_ARGS(EArgInt32, EArgInt32);
+
+    int Seq = Info[0]->Int32Value(Context).ToChecked();
+    int Index = Info[1]->Int32Value(Context).ToChecked();
+    for (auto Runtime : PuertsWasmRuntimeList)
+    {
+        if (Runtime->GetRuntimeSeq() == Seq)
+        {
+            if (auto ModuleInstance = Runtime->GetModuleInstance(Index))
+            {
+                Info.GetReturnValue().Set(static_cast<uint32_t>(ModuleInstance->TableLen()));
+            }
+            else
+            {
+                FV8Utils::ThrowException(Isolate, "invalid Module Instance index");
+            }
+            return;
+        }
+    }
+
+    FV8Utils::ThrowException(Isolate, "can not find associated runtime with memory");
+}
+
+void FJsEnvImpl::Wasm_Instance(const v8::FunctionCallbackInfo<v8::Value>& Info)
+{
+    v8::Isolate* Isolate = Info.GetIsolate();
+    v8::Isolate::Scope IsolateScope(Isolate);
+    v8::HandleScope HandleScope(Isolate);
+    v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
+    v8::Context::Scope ContextScope(Context);
+    // typedarray or arraybuffer, importobject or undefined, exports object
+    if (Info.Length() != 3)
+    {
+        FV8Utils::ThrowException(Isolate, "params number dismatch");
+        return;
+    }
+    if (!Info[2]->IsObject())
+    {
+        FV8Utils::ThrowException(Isolate, "params at 3 must be object");
+        return;
+    }
+    v8::Local<v8::Object> ExportsObject = Info[2].As<v8::Object>();
+
+    v8::Local<v8::ArrayBuffer> InArrayBuffer;
+    if (Info[0]->IsArrayBuffer())
+    {
+        InArrayBuffer = Info[0].As<v8::ArrayBuffer>();
+    }
+    else if (Info[0]->IsTypedArray())
+    {
+        InArrayBuffer = Info[0].As<v8::TypedArray>()->Buffer();
+    }
+
+#if defined(HAS_ARRAYBUFFER_NEW_WITHOUT_STL)
+    void* Buffer = static_cast<char*>(v8::ArrayBuffer_Get_Data(InArrayBuffer));
+#else
+    void* Buffer = InArrayBuffer->GetContents().Data();
+#endif
+    int BufferLength = InArrayBuffer->ByteLength();
+
+    TArray<uint8> InData;
+    InData.Append((uint8*) Buffer, BufferLength);
+    auto Runtime = NormalInstanceModule(
+        Isolate, Context, InData, ExportsObject, Info[1], PuertsWasmRuntimeList, PuertsWasmCachedLinkFunctionList);
+    if (Runtime)
+    {
+        Info.GetReturnValue().Set(Runtime->GetRuntimeSeq());
+    }
+}
+
+void FJsEnvImpl::Wasm_OverrideWebAssembly(const v8::FunctionCallbackInfo<v8::Value>& Info)
+{
+#if WASM3_OVERRIDE_WEBASSEMBLY
+    Info.GetReturnValue().Set(v8::True(Info.GetIsolate()));
+#else
+    Info.GetReturnValue().Set(v8::False(Info.GetIsolate()));
+#endif
+}
+
+#endif
 }    // namespace puerts

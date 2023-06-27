@@ -371,9 +371,10 @@ private:
     };
 
     template <typename T>
-    struct ReturnConverter<T, typename std::enable_if<ReturnByPointer && std::is_reference<T>::value && !std::is_const<T>::value &&
-                                                      (is_objecttype<typename std::decay<T>::type>::value ||
-                                                          is_uetype<typename std::decay<T>::type>::value)>::type>
+    struct ReturnConverter<T,
+        typename std::enable_if<(ReturnByPointer || (std::is_reference<T>::value && !std::is_const<T>::value)) &&
+                                (is_objecttype<typename std::decay<T>::type>::value ||
+                                    is_uetype<typename std::decay<T>::type>::value)>::type>
     {
         static ValueType Convert(ContextType context, T ret)
         {
@@ -995,10 +996,16 @@ private:
         auto context = GetContext(info);
 
         if (GetArgsLen(info) != ArgsLength)
+        {
+            ThrowException(info, "invalid parameter length");
             return nullptr;
+        }
 
         if (!internal::ArgumentChecker<0, ArgsLength, Args...>::Check(info, context))
+        {
+            ThrowException(info, "invalid parameter");
             return nullptr;
+        }
 
         return new T(internal::TypeConverter<Args>::toCpp(context, GetArg(info, index))...);
     }
@@ -1323,7 +1330,7 @@ public:
         {
             functionInfos_.push_back(GeneralFunctionReflectionInfo{name, info});
         }
-        functions_.push_back(GeneralFunctionInfo{name, func, nullptr});
+        functions_.push_back(GeneralFunctionInfo{name, func, nullptr, info});
         return *this;
     }
 
@@ -1333,7 +1340,7 @@ public:
         {
             functionInfos_.push_back(GeneralFunctionReflectionInfo{name, infos[i]});
         }
-        functions_.push_back(GeneralFunctionInfo{name, func, nullptr});
+        functions_.push_back(GeneralFunctionInfo{name, func, nullptr, nullptr});
         return *this;
     }
 
@@ -1343,7 +1350,7 @@ public:
         {
             methodInfos_.push_back(GeneralFunctionReflectionInfo{name, info});
         }
-        methods_.push_back(GeneralFunctionInfo{name, func, nullptr});
+        methods_.push_back(GeneralFunctionInfo{name, func, nullptr, info});
         return *this;
     }
 
@@ -1353,7 +1360,7 @@ public:
         {
             methodInfos_.push_back(GeneralFunctionReflectionInfo{name, infos[i]});
         }
-        methods_.push_back(GeneralFunctionInfo{name, func, nullptr});
+        methods_.push_back(GeneralFunctionInfo{name, func, nullptr, nullptr});
         return *this;
     }
 

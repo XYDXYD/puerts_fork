@@ -31,15 +31,20 @@ public class JsEnv : ModuleRules
     private bool ThreadSafe = false;
 
     private bool FTextAsString = true;
-
+    
+    public static bool WithSourceControl = false;
+    
     public JsEnv(ReadOnlyTargetRules Target) : base(Target)
     {
         //PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDefinitions.Add("USING_IN_UNREAL_ENGINE");
+        //PublicDefinitions.Add("WITH_V8_FAST_CALL");
         
         PublicDefinitions.Add("TS_BLUEPRINT_PATH=\"/Blueprints/TypeScript/\"");
         
         PublicDefinitions.Add(ThreadSafe ? "THREAD_SAFE" : "NOT_THREAD_SAFE");
+
+        ShadowVariableWarningLevel = WarningLevel.Warning;
 
         if (!FTextAsString)
         {
@@ -67,6 +72,39 @@ public class JsEnv : ModuleRules
                 bCanHotReloadField.SetValue(ContextField.GetValue(this), false);
             }
         }
+
+        bool bForceAllUFunctionInCPP = true;
+        if (bForceAllUFunctionInCPP)
+        {
+            PublicDefinitions.Add("PUERTS_FORCE_CPP_UFUNCTION=1");
+        }
+        else
+        {
+            PublicDefinitions.Add("PUERTS_FORCE_CPP_UFUNCTION=0");
+        }
+
+        bool UseWasm = false;
+        if (UseWasm)
+        {
+            PublicDefinitions.Add("USE_WASM3=1");
+        }
+        else
+        {
+            PublicDefinitions.Add("USE_WASM3=0");
+        }
+        bool OverrideWebAssembly = false;
+        if (OverrideWebAssembly)
+        {
+            PublicDefinitions.Add("WASM3_OVERRIDE_WEBASSEMBLY=1");
+        }
+        else
+        {
+            PublicDefinitions.Add("WASM3_OVERRIDE_WEBASSEMBLY=0");
+        }
+        PublicDependencyModuleNames.AddRange(new string[]
+            {
+                "WasmCore", "Json"
+            });
 
         if (UseNodejs)
         {
