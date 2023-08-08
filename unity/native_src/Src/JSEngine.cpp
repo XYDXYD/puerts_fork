@@ -95,7 +95,7 @@ namespace puerts
         std::string Flags = "--no-harmony-top-level-await --stack_size=856";
 
         Flags += " --expose-gc";
-        Flags += " --max-semi-space-size=4";
+        Flags += " --max-semi-space-size=8";
 #if PLATFORM_MAC
         Flags += " --jitless --no-expose-wasm";
 #endif
