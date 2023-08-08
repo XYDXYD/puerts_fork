@@ -75,8 +75,8 @@ public:
     explicit FJsEnvImpl(const FString& ScriptRoot);
 
     FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::shared_ptr<ILogger> InLogger, int InPort,
-        std::function<void(const FString&)> InOnSourceLoadedCallback, void* InExternalRuntime = nullptr,
-        void* InExternalContext = nullptr);
+        std::function<void(const FString&)> InOnSourceLoadedCallback, const FString InFlags, void* InExternalRuntime,
+        void* InExternalContext);
 
     virtual ~FJsEnvImpl() override;
 
@@ -189,7 +189,7 @@ public:
 
     virtual PropertyMacro* FindDelegateProperty(void* DelegatePtr) override;
 
-    virtual FScriptDelegate NewManualReleaseDelegate(v8::Isolate* Isolate, v8::Local<v8::Context>& Context,
+    virtual FScriptDelegate NewDelegate(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, UObject* Owner,
         v8::Local<v8::Function> JsFunction, UFunction* SignatureFunction) override;
 
     void ReleaseManualReleaseDelegate(const v8::FunctionCallbackInfo<v8::Value>& Info);
@@ -688,6 +688,8 @@ private:
     v8::Global<v8::Map> ManualReleaseCallbackMap;
 
     std::vector<TWeakObjectPtr<UDynamicDelegateProxy>> ManualReleaseCallbackList;
+
+    TMap<UObject*, TArray<TWeakObjectPtr<UDynamicDelegateProxy>>> AutoReleaseCallbacksMap;
 
 #ifndef WITH_QUICKJS
     TMap<FString, v8::Global<v8::Module>> PathToModule;

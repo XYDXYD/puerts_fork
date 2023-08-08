@@ -67,7 +67,7 @@ namespace Puerts.Editor
                 }
             }
 
-            public static List<RegisterInfoForGenerate> GetRegisterInfos(List<Type> genTypes)
+            public static List<RegisterInfoForGenerate> GetRegisterInfos(List<Type> genTypes, HashSet<Type> blittableCopyTypes)
             {
                 BindingFlags flag = BindingFlags.DeclaredOnly | BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public;
 
@@ -78,12 +78,27 @@ namespace Puerts.Editor
                     {
                         var Collector = new MRICollector();
 
-                        foreach (var m in type.GetConstructors(flag).ToArray())
+                        var ctors = type.GetConstructors(flag).ToArray();
+                        var hasParamlessCtor = false;
+                        foreach (var m in ctors)
                         {
+                            if (m.GetParameters().Length == 0) hasParamlessCtor = true;
                             Collector.Add(m.Name, new MemberRegisterInfoForGenerate
                             {
                                 Name = m.Name,
                                 UseBindingMode = Utils.getBindingMode(m).ToString(),
+                                MemberType = "Constructor",
+                                IsStatic = false,
+
+                                Constructor = "Constructor",
+                            }, false);
+                        }
+                        if (!hasParamlessCtor && type.IsValueType)
+                        {
+                            Collector.Add(".ctor", new MemberRegisterInfoForGenerate
+                            {
+                                Name = ".ctor",
+                                UseBindingMode = "FastBinding",
                                 MemberType = "Constructor",
                                 IsStatic = false,
 
@@ -217,7 +232,7 @@ namespace Puerts.Editor
                                     }, false);
                                 }
                             }
-                            else if (m.GetIndexParameters().GetLength(0) != 1 && !m.IsSpecialName)
+                            else if (m.GetIndexParameters().GetLength(0) == 0 && !m.IsSpecialName)
                             {
 
                                 Collector.Add(m.Name, new MemberRegisterInfoForGenerate
@@ -254,6 +269,8 @@ namespace Puerts.Editor
                         return new RegisterInfoForGenerate
                         {
                             WrapperName = Utils.GetWrapTypeName(type),
+
+                            BlittableCopy = blittableCopyTypes.Contains(type),
 
                             Type = type,
 

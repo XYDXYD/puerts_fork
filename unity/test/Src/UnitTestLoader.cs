@@ -45,7 +45,11 @@ namespace Puerts.UnitTest
             } 
             else if (UnityEngine.Resources.Load(FixSpecifier(specifier)) != null) 
             {
-                return FixSpecifier(specifier);
+                return specifier;
+            }
+            else if (UnityEngine.Resources.Load(FixSpecifier(specifier + "/index.js")) != null) 
+            {
+                return specifier + "/index.js";
             }
             return null;
         }
@@ -63,10 +67,13 @@ namespace Puerts.UnitTest
             if (specifier != null) {
                 if (specifier.StartsWith(UnityEngine.Application.streamingAssetsPath) || File.Exists(UnityEngine.Application.streamingAssetsPath + "/" + specifier)) {
                     return System.IO.File.ReadAllText(UnityEngine.Application.streamingAssetsPath + "/" + specifier);
+
                 } else if (mockFileContent.ContainsKey(specifier)) {
                     return mockFileContent[specifier];
+
                 } else if (UnityEngine.Resources.Load(FixSpecifier(specifier)) != null) {
                     return UnityEngine.Resources.Load<UnityEngine.TextAsset>(FixSpecifier(specifier)).text;
+
                 }
             }
             return "";

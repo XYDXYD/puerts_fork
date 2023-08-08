@@ -109,8 +109,8 @@
 namespace puerts
 {
 FJsEnvImpl::FJsEnvImpl(const FString& ScriptRoot)
-    : FJsEnvImpl(
-          std::make_shared<DefaultJSModuleLoader>(ScriptRoot), std::make_shared<FDefaultLogger>(), -1, nullptr, nullptr, nullptr)
+    : FJsEnvImpl(std::make_shared<DefaultJSModuleLoader>(ScriptRoot), std::make_shared<FDefaultLogger>(), -1, nullptr, FString(),
+          nullptr, nullptr)
 {
 }
 
@@ -118,11 +118,7 @@ static void FNameToArrayBuffer(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     FName Name = FV8Utils::ToFName(Info.GetIsolate(), Info[0]);
     v8::Local<v8::ArrayBuffer> Ab = v8::ArrayBuffer::New(Info.GetIsolate(), sizeof(FName));
-#if defined(HAS_ARRAYBUFFER_NEW_WITHOUT_STL)
-    void* Buff = v8::ArrayBuffer_Get_Data(Ab);
-#else
-    void* Buff = Ab->GetContents().Data();
-#endif
+    void* Buff = DataTransfer::GetArrayBufferData(Ab);
     ::memcpy(Buff, &Name, sizeof(FName));
     Info.GetReturnValue().Set(Ab);
 }
@@ -140,11 +136,7 @@ static void ToCString(const v8::FunctionCallbackInfo<v8::Value>& Info)
 
     const size_t Length = Str->Utf8Length(Isolate);
     v8::Local<v8::ArrayBuffer> Ab = v8::ArrayBuffer::New(Info.GetIsolate(), Length + 1);
-#if defined(HAS_ARRAYBUFFER_NEW_WITHOUT_STL)
-    char* Buff = static_cast<char*>(v8::ArrayBuffer_Get_Data(Ab));
-#else
-    char* Buff = static_cast<char*>(Ab->GetContents().Data());
-#endif
+    char* Buff = static_cast<char*>(DataTransfer::GetArrayBufferData(Ab));
     Str->WriteUtf8(Isolate, Buff);
     Buff[Length] = '\0';
     Info.GetReturnValue().Set(Ab);
@@ -155,11 +147,7 @@ static void ToCPtrArray(const v8::FunctionCallbackInfo<v8::Value>& Info)
     const size_t Length = sizeof(void*) * Info.Length();
 
     v8::Local<v8::ArrayBuffer> Ret = v8::ArrayBuffer::New(Info.GetIsolate(), Length);
-#if defined(HAS_ARRAYBUFFER_NEW_WITHOUT_STL)
-    void** Buff = static_cast<void**>(v8::ArrayBuffer_Get_Data(Ret));
-#else
-    void** Buff = static_cast<void**>(Ret->GetContents().Data());
-#endif
+    void** Buff = static_cast<void**>(DataTransfer::GetArrayBufferData(Ret));
 
     for (int i = 0; i < Info.Length(); i++)
     {
@@ -169,20 +157,12 @@ static void ToCPtrArray(const v8::FunctionCallbackInfo<v8::Value>& Info)
         {
             v8::Local<v8::ArrayBufferView> BuffView = Val.As<v8::ArrayBufferView>();
             auto Ab = BuffView->Buffer();
-#if defined(HAS_ARRAYBUFFER_NEW_WITHOUT_STL)
-            Ptr = static_cast<char*>(v8::ArrayBuffer_Get_Data(Ab)) + BuffView->ByteOffset();
-#else
-            Ptr = static_cast<char*>(Ab->GetContents().Data()) + BuffView->ByteOffset();
-#endif
+            Ptr = static_cast<char*>(DataTransfer::GetArrayBufferData(Ab)) + BuffView->ByteOffset();
         }
         else if (Val->IsArrayBuffer())
         {
             auto Ab = v8::Local<v8::ArrayBuffer>::Cast(Val);
-#if defined(HAS_ARRAYBUFFER_NEW_WITHOUT_STL)
-            Ptr = static_cast<char*>(v8::ArrayBuffer_Get_Data(Ab));
-#else
-            Ptr = static_cast<char*>(Ab->GetContents().Data());
-#endif
+            Ptr = static_cast<char*>(DataTransfer::GetArrayBufferData(Ab));
         }
         Buff[i] = Ptr;
     }
@@ -357,7 +337,8 @@ void FJsEnvImpl::StopPolling()
 #endif
 
 FJsEnvImpl::FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::shared_ptr<ILogger> InLogger, int InDebugPort,
-    std::function<void(const FString&)> InOnSourceLoadedCallback, void* InExternalRuntime, void* InExternalContext)
+    std::function<void(const FString&)> InOnSourceLoadedCallback, const FString InFlags, void* InExternalRuntime,
+    void* InExternalContext)
 {
     GUObjectArray.AddUObjectDeleteListener(static_cast<FUObjectArray::FUObjectDeleteListener*>(this));
 
@@ -373,6 +354,25 @@ FJsEnvImpl::FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::sha
 
     // char GCFlags[] = "--expose-gc";
     // v8::V8::SetFlagsFromString(GCFlags, sizeof(GCFlags));
+
+    if (!InFlags.IsEmpty())
+    {
+#if !defined(WITH_NODEJS) && !defined(WITH_QUICKJS)
+        TArray<FString> Flags;
+        InFlags.ParseIntoArray(Flags, TEXT(" "));
+        for (auto& Flag : Flags)
+        {
+            static FString Max_Old_Space_Size_Name(TEXT("--max-old-space-size="));
+            if (Flag.StartsWith(Max_Old_Space_Size_Name))
+            {
+                size_t Val = FCString::Atoi(*Flag.Mid(Max_Old_Space_Size_Name.Len()));
+                CreateParams.constraints.set_max_old_generation_size_in_bytes(Val * 1024 * 1024);
+            }
+        }
+#else
+        v8::V8::SetFlagsFromString(TCHAR_TO_UTF8(*InFlags));
+#endif
+    }
 
     Started = false;
     Inspector = nullptr;
@@ -737,6 +737,17 @@ FJsEnvImpl::~FJsEnvImpl()
             if (!Iter->second.PassByPointer)
             {
                 delete ((FScriptDelegate*) Iter->first);
+            }
+        }
+
+        for (auto& KV : AutoReleaseCallbacksMap)
+        {
+            for (auto& Callback : KV.Value)
+            {
+                if (Callback.IsValid())
+                {
+                    Callback->JsFunction.Reset();
+                }
             }
         }
 
@@ -1695,6 +1706,7 @@ v8::Local<v8::Value> FJsEnvImpl::FindOrAdd(
     {
         bool Existed;
         auto TemplateInfoPtr = GetTemplateInfoOfType(Class, Existed);
+
         auto Result = TemplateInfoPtr->Template.Get(Isolate)->InstanceTemplate()->NewInstance(Context).ToLocalChecked();
         auto ClassWrapper = static_cast<FClassWrapper*>(TemplateInfoPtr->StructWrapper.get());
         Bind(ClassWrapper, UEObject, Result);
@@ -2002,25 +2014,26 @@ void FJsEnvImpl::NotifyUObjectDeleted(const class UObjectBase* ObjectBase, int32
     TryReleaseType((UStruct*) ObjectBase);
 
 #if !defined(ENGINE_INDEPENDENT_JSENV)
-    UTypeScriptGeneratedClass* GeneratedClass = (UTypeScriptGeneratedClass*) ObjectBase;
-    auto BindInfoPtr = BindInfoMap.Find(GeneratedClass);
-    if (BindInfoPtr)
-    {
-        BindInfoMap.Remove(GeneratedClass);
-    }
+    BindInfoMap.Remove((UTypeScriptGeneratedClass*) ObjectBase);
 #endif
 
     UnBind(nullptr, (UObject*) ObjectBase, true);
 
-    UClass* Class = (UClass*) ObjectBase;
-    if (GeneratedClasses.Contains(Class))
-    {
-        GeneratedClasses.Remove(Class);
-    }
+    GeneratedClasses.Remove((UClass*) ObjectBase);
 
     TsFunctionMap.Remove((UFunction*) ObjectBase);
     MixinFunctionMap.Remove((UFunction*) ObjectBase);
     ContainerMeta.NotifyElementTypeDeleted((UField*) ObjectBase);
+
+    auto CallbacksPtr = AutoReleaseCallbacksMap.Find((UObject*) ObjectBase);
+    if (CallbacksPtr)
+    {
+        for (auto Callback : *CallbacksPtr)
+        {
+            SysObjectRetainer.Release(Callback.Get());
+        }
+        AutoReleaseCallbacksMap.Remove((UObject*) ObjectBase);
+    }
 }
 
 void FJsEnvImpl::TryReleaseType(UStruct* Struct)
@@ -2371,34 +2384,53 @@ PropertyMacro* FJsEnvImpl::FindDelegateProperty(void* DelegatePtr)
                                          : (PropertyMacro*) Iter->second.MulticastDelegateProperty;
 }
 
-FScriptDelegate FJsEnvImpl::NewManualReleaseDelegate(
-    v8::Isolate* Isolate, v8::Local<v8::Context>& Context, v8::Local<v8::Function> JsFunction, UFunction* SignatureFunction)
+FScriptDelegate FJsEnvImpl::NewDelegate(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, UObject* Owner,
+    v8::Local<v8::Function> JsFunction, UFunction* SignatureFunction)
 {
-    auto CallbacksMap = ManualReleaseCallbackMap.Get(Isolate);
-    auto MaybeProxy = CallbacksMap->Get(Context, JsFunction);
     UDynamicDelegateProxy* DelegateProxy = nullptr;
-    if (MaybeProxy.IsEmpty() || !MaybeProxy.ToLocalChecked()->IsExternal())
+    if (Owner)
     {
+        TArray<TWeakObjectPtr<UDynamicDelegateProxy>>& Callbacks = AutoReleaseCallbacksMap.FindOrAdd(Owner);
+
         DelegateProxy = NewObject<UDynamicDelegateProxy>();
 #ifdef THREAD_SAFE
         DelegateProxy->Isolate = Isolate;
 #endif
-        DelegateProxy->Owner = DelegateProxy;
+        DelegateProxy->Owner = Owner;
         DelegateProxy->SignatureFunction = SignatureFunction;
         DelegateProxy->DynamicInvoker = DynamicInvoker;
         DelegateProxy->JsFunction = v8::UniquePersistent<v8::Function>(Isolate, JsFunction);
 
         SysObjectRetainer.Retain(DelegateProxy);
-        __USE(CallbacksMap->Set(Context, JsFunction, v8::External::New(Context->GetIsolate(), DelegateProxy)));
-
-        ManualReleaseCallbackList.push_back(DelegateProxy);
+        Callbacks.Add(DelegateProxy);
     }
     else
     {
-        DelegateProxy =
-            Cast<UDynamicDelegateProxy>(static_cast<UObject*>(v8::Local<v8::External>::Cast(MaybeProxy.ToLocalChecked())->Value()));
-    }
+        auto CallbacksMap = ManualReleaseCallbackMap.Get(Isolate);
+        auto MaybeProxy = CallbacksMap->Get(Context, JsFunction);
 
+        if (MaybeProxy.IsEmpty() || !MaybeProxy.ToLocalChecked()->IsExternal())
+        {
+            DelegateProxy = NewObject<UDynamicDelegateProxy>();
+#ifdef THREAD_SAFE
+            DelegateProxy->Isolate = Isolate;
+#endif
+            DelegateProxy->Owner = DelegateProxy;
+            DelegateProxy->SignatureFunction = SignatureFunction;
+            DelegateProxy->DynamicInvoker = DynamicInvoker;
+            DelegateProxy->JsFunction = v8::UniquePersistent<v8::Function>(Isolate, JsFunction);
+
+            SysObjectRetainer.Retain(DelegateProxy);
+            __USE(CallbacksMap->Set(Context, JsFunction, v8::External::New(Context->GetIsolate(), DelegateProxy)));
+
+            ManualReleaseCallbackList.push_back(DelegateProxy);
+        }
+        else
+        {
+            DelegateProxy = Cast<UDynamicDelegateProxy>(
+                static_cast<UObject*>(v8::Local<v8::External>::Cast(MaybeProxy.ToLocalChecked())->Value()));
+        }
+    }
     FScriptDelegate Delegate;
     Delegate.BindUFunction(DelegateProxy, NAME_Fire);
     return Delegate;
@@ -3284,7 +3316,11 @@ void FJsEnvImpl::Start(const FString& ModuleNameOrScript, const TArray<TPair<FSt
 
     if (IsScript)
     {
+#if V8_MAJOR_VERSION > 8
+        v8::ScriptOrigin Origin(Isolate, FV8Utils::ToV8String(Isolate, "chunk"));
+#else
         v8::ScriptOrigin Origin(FV8Utils::ToV8String(Isolate, "chunk"));
+#endif
         v8::Local<v8::String> Source = FV8Utils::ToV8String(Isolate, ModuleNameOrScript);
         v8::TryCatch TryCatch(Isolate);
 
@@ -3460,9 +3496,14 @@ v8::MaybeLocal<v8::Module> FJsEnvImpl::FetchESModuleTree(v8::Local<v8::Context> 
     FString Script;
     FFileHelper::BufferToString(Script, Data.GetData(), Data.Num());
 
+#if V8_MAJOR_VERSION > 8
+    v8::ScriptOrigin Origin(
+        Isolate, FV8Utils::ToV8String(Isolate, FileName), 0, 0, false, -1, v8::Local<v8::Value>(), false, false, true);
+#else
     v8::ScriptOrigin Origin(FV8Utils::ToV8String(Isolate, FileName), v8::Local<v8::Integer>(), v8::Local<v8::Integer>(),
         v8::Local<v8::Boolean>(), v8::Local<v8::Integer>(), v8::Local<v8::Value>(), v8::Local<v8::Boolean>(),
         v8::Local<v8::Boolean>(), v8::True(Isolate));
+#endif
     v8::ScriptCompiler::Source Source(FV8Utils::ToV8String(Isolate, Script), Origin);
 
     v8::Local<v8::Module> Module;
@@ -3610,7 +3651,11 @@ void FJsEnvImpl::ExecuteModule(const FString& ModuleName, std::function<FString(
         FString FormattedScriptUrl = DebugPath;
 #endif
         v8::Local<v8::String> Name = FV8Utils::ToV8String(Isolate, FormattedScriptUrl);
+#if V8_MAJOR_VERSION > 8
+        v8::ScriptOrigin Origin(Isolate, Name);
+#else
         v8::ScriptOrigin Origin(Name);
+#endif
         v8::TryCatch TryCatch(Isolate);
 
         auto CompiledScript = v8::Script::Compile(Context, Source, &Origin);
@@ -3675,7 +3720,11 @@ void FJsEnvImpl::EvalScript(const v8::FunctionCallbackInfo<v8::Value>& Info)
     FString FormattedScriptUrl = ScriptUrl;
 #endif
     v8::Local<v8::String> Name = FV8Utils::ToV8String(Isolate, FormattedScriptUrl);
+#if V8_MAJOR_VERSION > 8
+    v8::ScriptOrigin Origin(Isolate, Name);
+#else
     v8::ScriptOrigin Origin(Name);
+#endif
     auto Script = v8::Script::Compile(Context, Source, &Origin);
     if (Script.IsEmpty())
     {
@@ -4215,25 +4264,23 @@ void FJsEnvImpl::DumpStatisticsLog(const v8::FunctionCallbackInfo<v8::Value>& In
 
     FString StatisticsLog = FString::Printf(TEXT("------------------------\n"
                                                  "Dump Statistics of V8:\n"
-                                                 "total_heap_size: %u\n"
-                                                 "total_heap_size_executable: %u\n"
-                                                 "total_physical_size: %u\n"
-                                                 "total_available_size: %u\n"
-                                                 "used_heap_size: %u\n"
-                                                 "heap_size_limit: %u\n"
-                                                 "malloced_memory: %u\n"
-                                                 "external_memory: %u\n"
-                                                 "peak_malloced_memory: %u\n"
-                                                 "number_of_native_contexts: %u\n"
-                                                 "number_of_detached_contexts: %u\n"
-                                                 "does_zap_garbage: %u\n"
+                                                 "total_heap_size: %llu\n"
+                                                 "total_heap_size_executable: %llu\n"
+                                                 "total_physical_size: %llu\n"
+                                                 "total_available_size: %llu\n"
+                                                 "used_heap_size: %llu\n"
+                                                 "heap_size_limit: %llu\n"
+                                                 "malloced_memory: %llu\n"
+                                                 "external_memory: %llu\n"
+                                                 "peak_malloced_memory: %llu\n"
+                                                 "number_of_native_contexts: %llu\n"
+                                                 "number_of_detached_contexts: %llu\n"
+                                                 "does_zap_garbage: %llu\n"
                                                  "------------------------\n"),
-        static_cast<uint32_t>(Statistics.total_heap_size()), static_cast<uint32_t>(Statistics.total_heap_size_executable()),
-        static_cast<uint32_t>(Statistics.total_physical_size()), static_cast<uint32_t>(Statistics.total_available_size()),
-        static_cast<uint32_t>(Statistics.used_heap_size()), static_cast<uint32_t>(Statistics.heap_size_limit()),
-        static_cast<uint32_t>(Statistics.malloced_memory()), static_cast<uint32_t>(Statistics.external_memory()),
-        static_cast<uint32_t>(Statistics.peak_malloced_memory()), static_cast<uint32_t>(Statistics.number_of_native_contexts()),
-        static_cast<uint32_t>(Statistics.number_of_detached_contexts()), static_cast<uint32_t>(Statistics.does_zap_garbage()));
+        Statistics.total_heap_size(), Statistics.total_heap_size_executable(), Statistics.total_physical_size(),
+        Statistics.total_available_size(), Statistics.used_heap_size(), Statistics.heap_size_limit(), Statistics.malloced_memory(),
+        Statistics.external_memory(), Statistics.peak_malloced_memory(), Statistics.number_of_native_contexts(),
+        Statistics.number_of_detached_contexts(), Statistics.does_zap_garbage());
 
     Logger->Info(StatisticsLog);
 #endif    // !WITH_QUICKJS
@@ -4303,11 +4350,7 @@ void FJsEnvImpl::Wasm_MemoryBuffer(const v8::FunctionCallbackInfo<v8::Value>& In
             uint8* Ptr = Runtime->GetBuffer(Length);
             if (Ptr)
             {
-#if defined(HAS_ARRAYBUFFER_NEW_WITHOUT_STL)
-                auto Buffer = v8::ArrayBuffer_New_Without_Stl(Isolate, Ptr, Length);
-#else
-                auto Buffer = v8::ArrayBuffer::New(Isolate, Ptr, Length, v8::ArrayBufferCreationMode::kExternalized);
-#endif
+                auto Buffer = DataTransfer::NewArrayBuffer(Context, Ptr, Length);
                 Info.GetReturnValue().Set(Buffer);
             }
             else
@@ -4456,11 +4499,7 @@ void FJsEnvImpl::Wasm_Instance(const v8::FunctionCallbackInfo<v8::Value>& Info)
         InArrayBuffer = Info[0].As<v8::TypedArray>()->Buffer();
     }
 
-#if defined(HAS_ARRAYBUFFER_NEW_WITHOUT_STL)
-    void* Buffer = static_cast<char*>(v8::ArrayBuffer_Get_Data(InArrayBuffer));
-#else
-    void* Buffer = InArrayBuffer->GetContents().Data();
-#endif
+    void* Buffer = static_cast<char*>(DataTransfer::GetArrayBufferData(InArrayBuffer));
     int BufferLength = InArrayBuffer->ByteLength();
 
     TArray<uint8> InData;

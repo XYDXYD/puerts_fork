@@ -76,7 +76,7 @@ var global = global || (function () { return this; }());
         return (packageConfigure && packageConfigure.type === "module") ? packageConfigure.main : undefined;
     }
     
-    function genRequire(requiringDir, isESM) {
+    function genRequire(requiringDir, outerIsESM) {
         let localModuleCache = Object.create(null);
         function require(moduleName) {
             if (org_require) {
@@ -120,12 +120,8 @@ var global = global || (function () { return this; }());
             moduleCache[key] = m;
             let sid = addModule(m);
             let script = loadModule(fullPath);
-            isESM = isESM === true || fullPath.endsWith(".mjs")
-            let cachedIsESM = isESM;
-            if (fullPath.endsWith(".cjs")) {
-                isESM = true;
-                cachedIsESM = false;
-            }
+            let isESM = outerIsESM === true || fullPath.endsWith(".mjs")
+            if (fullPath.endsWith(".cjs")) isESM = false;
             if (fullPath.endsWith(".json")) {
                 let packageConfigure = JSON.parse(script);
                 
@@ -142,14 +138,12 @@ var global = global || (function () { return this; }());
                         if (!url) {
                             throw new Error("can not require a esm in cjs module!");
                         }
-                        isESM = cachedIsESM;
                     }
                     let fullDirInJs = (fullPath.indexOf('/') != -1) ? fullPath.substring(0, fullPath.lastIndexOf("/")) : fullPath.substring(0, fullPath.lastIndexOf("\\")).replace(/\\/g, '\\\\');
                     let tmpRequire = genRequire(fullDirInJs, isESM);
                     let r = tmpRequire(url);
                     tmpModuleStorage[sid] = undefined;
                     m.exports = r;
-                    isESM = cachedIsESM;
                 } else {
                     tmpModuleStorage[sid] = undefined;
                     m.exports = packageConfigure;

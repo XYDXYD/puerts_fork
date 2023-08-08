@@ -27,7 +27,39 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
 
     public bool FileExists(string specifier)
     {
-        return !System.String.IsNullOrEmpty(Resolve(specifier, "."));
+        var res = !System.String.IsNullOrEmpty(Resolve(specifier, "."));
+        return res;
+    }
+
+    private string TryResolve(string specifier)
+    {
+        string path = Path.Combine(root, specifier);
+        if (System.IO.File.Exists(path)) 
+        {
+            return path.Replace("\\", "/");
+        }
+        path = Path.Combine(commonjsRoot, specifier);
+        if (System.IO.File.Exists(path)) 
+        {
+            return path.Replace("\\", "/");
+        }
+        path = Path.Combine(editorRoot, specifier);
+        if (System.IO.File.Exists(path)) 
+        {
+            return path.Replace("\\", "/");
+        }
+
+        path = Path.Combine(unittestRoot, specifier);
+        if (System.IO.File.Exists(path)) 
+        {
+            return path.Replace("\\", "/");
+        }
+
+        else if (mockFileContent.ContainsKey(specifier)) 
+        {
+            return specifier;
+        } 
+        return null;
     }
 
     public string Resolve(string specifier, string referrer)
@@ -37,35 +69,10 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
             specifier = PathHelper.normalize(PathHelper.Dirname(referrer) + "/" + specifier);
         }
 
-        string path = Path.Combine(root, specifier);
-        if (System.IO.File.Exists(path)) 
-        {
-            return path;
-        }
-        path = Path.Combine(commonjsRoot, specifier);
-        if (System.IO.File.Exists(path)) 
-        {
-            return path;
-        }
-        path = Path.Combine(editorRoot, specifier);
-        if (System.IO.File.Exists(path)) 
-        {
-            return path;
-        }
-
-        path = Path.Combine(unittestRoot, specifier);
-        if (System.IO.File.Exists(path)) 
-        {
-            return path;
-        }
-        else if (mockFileContent.ContainsKey(specifier)) 
-        {
-            return specifier;
-        } 
-        else if (mockFileContent.ContainsKey(specifier + "/index.js")) 
-        {
-            return specifier + "/index.js";
-        }
+        var specifier1 = TryResolve(specifier);
+        if (specifier1 == null) specifier1 = TryResolve(specifier + ".txt");
+        if (specifier1 == null) specifier1 = TryResolve(specifier + "/index.js.txt");
+        if (specifier1 != null) return specifier1;
         return null;
     }
 

@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 you can get the english version change log at [Github Release](https://github.com/Tencent/puerts/releases)
 
+## [2.0.0] - 2023-07-31
+1. Fix: `debugpath` was not work and make VSCode debug not availabled
+2. Fix: `puer.$genericMethod` cannot get the genericMethod from super class in xil2cpp mode #1417 @danij91
+3. Fix: `GetFriendlyName is not a function` when generating extensionInfo #1437
+
+This is the first stable version of `2.0.0`. Shout out to everyone who attending the test.
+
+If you need any help in upgrading. See [upgrade guide](https://puerts.github.io/en/docs/puerts/unity/other/upgrade/)
+
+## [2.0.0-rc.1] - 2023-07-14
+1. Fix: BlitableCopy was broken issue #1427
+2. Fix: two wrapper generation issue #1433 #1432
+
+## [2.0.0-rc.0] - 2023-06-30
+1. Fix: struct's paramless default ctor was unable to use #1301
+2. Fix: op_xxxx method was unable to use after generated #1399
+3. Fix: `GetFriendlyName` was not defined after generated
+4. Fix: the Constructor of BlittableCopy Type didn't invoked
+5. Optimization: isESM check optimize #1391
+
 ## [2.0.0-pre.5] - 2023-06-15
 1. Fix: Error occurs when generating classes with `op_explicit` #1363.
 2. Fix: Issue with `ClearModuleCache` causing a crash #1364.
