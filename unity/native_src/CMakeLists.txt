@@ -197,7 +197,7 @@ elseif (UNIX)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
 endif ()
-# target_compile_definitions (puerts PRIVATE WITH_INSPECTOR)
+target_compile_definitions (puerts PRIVATE WITH_INSPECTOR)
 
 # link
 target_link_libraries(puerts
