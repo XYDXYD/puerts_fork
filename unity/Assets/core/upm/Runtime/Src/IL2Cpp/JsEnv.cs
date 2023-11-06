@@ -5,6 +5,7 @@
 * This file is subject to the terms and conditions defined in file 'LICENSE', which is part of this source code package.
 */
 
+#if UNITY_2020_1_OR_NEWER
 #if EXPERIMENTAL_IL2CPP_PUERTS && ENABLE_IL2CPP
 
 using System;
@@ -50,6 +51,12 @@ namespace Puerts
         public ILoader GetLoader() 
         {
             return loader;
+        }
+
+        public IntPtr Isolate {
+            get {
+                return PuertsIl2cpp.NativeAPI.GetIsolate(nativeJsEnv);
+            }
         }
 
         public JsEnv(): this(new DefaultLoader(), -1) {}
@@ -240,4 +247,5 @@ namespace Puerts
     }
 }
 
+#endif
 #endif

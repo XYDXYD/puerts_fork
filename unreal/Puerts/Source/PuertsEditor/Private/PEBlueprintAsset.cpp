@@ -40,6 +40,8 @@
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
 #include "Kismet2/ComponentEditorUtils.h"
+#include "Editor.h"
+#include "HAL/PlatformFileManager.h"
 
 #define LOCTEXT_NAMESPACE "UPEBlueprintAsset"
 
@@ -151,8 +153,6 @@ bool UPEBlueprintAsset::LoadOrCreate(
         ParentClass, Package, *InName, BlueprintType, BlueprintClass, BlueprintGeneratedClass, FName("PuertsAutoGen"));
     if (Blueprint)
     {
-        // static FName InterfaceClassName = FName(TEXT("TypeScriptObject"));
-        // FBlueprintEditorUtils::ImplementNewInterface(Blueprint, InterfaceClassName);
         // Notify the asset registry
         FAssetRegistryModule::AssetCreated(Blueprint);
 
@@ -1170,8 +1170,17 @@ void UPEBlueprintAsset::AddMemberVariableWithMetaData(FName InNewVarName, FPEGra
     }
     AddMemberVariable(InNewVarName, InGraphPinType, InPinValueType, InLFlags, InHFLags, InLifetimeCondition);
     const int32 VarIndex = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, InNewVarName);
-    if (VarIndex == INDEX_NONE || !IsValid(InMetaData))
+    if (VarIndex == INDEX_NONE)
     {
+        return;
+    }
+    if (!IsValid(InMetaData))
+    {
+        if (!InMetaData && Blueprint->NewVariables[VarIndex].MetaDataArray.Num() > 0)
+        {
+            NeedSave = true;
+            Blueprint->NewVariables[VarIndex].MetaDataArray.Empty();
+        }
         return;
     }
 
