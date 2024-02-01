@@ -115,8 +115,6 @@ public:
 
     void MemoryPressureNotification(v8::MemoryPressureLevel level);
 
-    void LowMemoryNotification();
-
     JSFunction* CreateJSFunction(v8::Isolate* InIsolate, v8::Local<v8::Context> InContext, v8::Local<v8::Function> InFunction);
 
     void ReleaseJSFunction(JSFunction* InFunction);

@@ -684,12 +684,6 @@ namespace puerts
 #endif
     }
 
-    void JSEngine::LowMemoryNotification()
-    {
-#ifndef WITH_QUICKJS
-        MainIsolate->LowMemoryNotification();
-#endif
-    }
 
     void JSEngine::CreateInspector(int32_t Port)
     {    
