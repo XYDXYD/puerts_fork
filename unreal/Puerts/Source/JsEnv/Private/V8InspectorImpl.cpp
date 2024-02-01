@@ -16,6 +16,10 @@
 
 #include "V8InspectorImpl.h"
 
+#if USING_UE
+#include "UECompatible.h"
+#endif
+
 #include <functional>
 #include <string>
 #include <locale>

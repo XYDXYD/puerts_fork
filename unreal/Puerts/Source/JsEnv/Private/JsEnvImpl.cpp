@@ -345,9 +345,9 @@ FJsEnvImpl::FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::sha
     if (!InFlags.IsEmpty())
     {
 #if !defined(WITH_NODEJS) && !defined(WITH_QUICKJS)
-        TArray<FString> Flags;
-        InFlags.ParseIntoArray(Flags, TEXT(" "));
-        for (auto& Flag : Flags)
+        TArray<FString> FlagArray;
+        InFlags.ParseIntoArray(FlagArray, TEXT(" "));
+        for (auto& Flag : FlagArray)
         {
             static FString Max_Old_Space_Size_Name(TEXT("--max-old-space-size="));
             if (Flag.StartsWith(Max_Old_Space_Size_Name))
@@ -356,8 +356,6 @@ FJsEnvImpl::FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::sha
                 CreateParams.constraints.set_max_old_generation_size_in_bytes(Val * 1024 * 1024);
             }
         }
-#else
-        v8::V8::SetFlagsFromString(TCHAR_TO_UTF8(*InFlags));
 #endif
     }
 
@@ -688,7 +686,7 @@ FJsEnvImpl::~FJsEnvImpl()
 
     for (int i = 0; i < ManualReleaseCallbackList.size(); i++)
     {
-        if (ManualReleaseCallbackList[i].IsValid())
+        if (ManualReleaseCallbackList[i].IsValid(true))
         {
             ManualReleaseCallbackList[i].Get()->JsFunction.Reset();
         }
@@ -749,7 +747,7 @@ FJsEnvImpl::~FJsEnvImpl()
         for (auto Iter = DelegateMap.begin(); Iter != DelegateMap.end(); Iter++)
         {
             Iter->second.JSObject.Reset();
-            if (Iter->second.Proxy.IsValid())
+            if (Iter->second.Proxy.IsValid(true))
             {
                 Iter->second.Proxy->JsFunction.Reset();
             }
@@ -765,7 +763,7 @@ FJsEnvImpl::~FJsEnvImpl()
         {
             for (auto& Callback : KV.Value)
             {
-                if (Callback.IsValid())
+                if (Callback.IsValid(true))
                 {
                     Callback->JsFunction.Reset();
                 }
@@ -782,8 +780,8 @@ FJsEnvImpl::~FJsEnvImpl()
 
         for (auto Iter = TimerInfos.CreateIterator(); Iter; ++Iter)
         {
-            Iter->Callback.Reset();
-            FUETicker::GetCoreTicker().RemoveTicker(Iter->TickerHandle);
+            Iter->Value.Callback.Reset();
+            FUETicker::GetCoreTicker().RemoveTicker(Iter->Value.TickerHandle);
         }
         TimerInfos.Empty();
 
@@ -2540,7 +2538,7 @@ bool FJsEnvImpl::RemoveFromDelegate(
 
         __USE(RemoveListItem.Get(Isolate)->Call(Context, v8::Undefined(Isolate), 2, Args));
 
-        if (JsCallbacks->Length() == 0)
+        if (JsCallbacks->Length() == 0 && Iter->second.Proxy.IsValid())
         {
             auto DelegateProxy = Iter->second.Proxy.Get();
 
@@ -3031,9 +3029,9 @@ bool FJsEnvImpl::IsInstanceOf(UStruct* Struct, v8::Local<v8::Object> JsObject)
     }
 }
 
-bool FJsEnvImpl::IsInstanceOfCppObject(const void* TypeId, v8::Local<v8::Object> JsObject)
+bool FJsEnvImpl::IsInstanceOfCppObject(v8::Isolate* Isolate, const void* TypeId, v8::Local<v8::Object> JsObject)
 {
-    return CppObjectMapper.IsInstanceOfCppObject(TypeId, JsObject);
+    return CppObjectMapper.IsInstanceOfCppObject(Isolate, TypeId, JsObject);
 }
 
 std::weak_ptr<int> FJsEnvImpl::GetJsEnvLifeCycleTracker()
@@ -3884,13 +3882,17 @@ void FJsEnvImpl::SetFTickerDelegate(const v8::FunctionCallbackInfo<v8::Value>& I
     v8::Isolate* Isolate = Info.GetIsolate();
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
-    int DelegateHandleId = TimerInfos.Add(FTimerInfo());
-    TimerInfos[DelegateHandleId].Callback.Reset(Isolate, v8::Local<v8::Function>::Cast(Info[0]));
+    while (!(++TimerID))    // TimerID > 0
+    {
+    }
+    uint32_t DelegateHandleId = TimerID;
+    FTimerInfo& TimerInfo = TimerInfos.Emplace(DelegateHandleId, FTimerInfo());
+    TimerInfo.Callback.Reset(Isolate, v8::Local<v8::Function>::Cast(Info[0]));
 
     float Millisecond = Info[1]->NumberValue(Context).ToChecked();
     float Delay = Millisecond / 1000.f;
 
-    TimerInfos[DelegateHandleId].TickerHandle =
+    TimerInfo.TickerHandle =
         FUETicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([this, DelegateHandleId, Continue](float)
                                                  { return this->TimerCallback(DelegateHandleId, Continue); }),
             Delay);
@@ -3913,12 +3915,14 @@ bool FJsEnvImpl::TimerCallback(int DelegateHandleId, bool Continue)
     v8::Local<v8::Context> Context = DefaultContext.Get(Isolate);
     v8::Context::Scope ContextScope(Context);
 
-    if (!TimerInfos.IsValidIndex(DelegateHandleId))
+    FTimerInfo* PTimeInfo = TimerInfos.Find(DelegateHandleId);
+    if (!PTimeInfo)
     {
         Logger->Warn(FString::Printf(TEXT("Try to callback a invalid timer: %d"), DelegateHandleId));
         return false;
     }
 
+    auto OriginHandle = PTimeInfo->TickerHandle;
     v8::Local<v8::Function> Function = TimerInfos[DelegateHandleId].Callback.Get(Isolate);
 
     v8::TryCatch TryCatch(Isolate);
@@ -3931,22 +3935,24 @@ bool FJsEnvImpl::TimerCallback(int DelegateHandleId, bool Continue)
         Logger->Error(Message);
     }
 
-    if (!Continue)
+    auto ClearInCallback = !TimerInfos.Contains(DelegateHandleId) || (OriginHandle != TimerInfos[DelegateHandleId].TickerHandle);
+
+    if (!Continue && !ClearInCallback)
     {
         RemoveFTickerDelegateHandle(DelegateHandleId);
     }
 
-    return Continue && TimerInfos.IsAllocated(DelegateHandleId);
+    return Continue && !ClearInCallback;
 }
 
 void FJsEnvImpl::RemoveFTickerDelegateHandle(int DelegateHandleId)
 {
-    if (!TimerInfos.IsValidIndex(DelegateHandleId))
+    if (!TimerInfos.Contains(DelegateHandleId))
     {
         return;
     }
     FUETicker::GetCoreTicker().RemoveTicker(TimerInfos[DelegateHandleId].TickerHandle);
-    TimerInfos.RemoveAt(DelegateHandleId);
+    TimerInfos.Remove(DelegateHandleId);
 }
 
 void FJsEnvImpl::ClearInterval(const v8::FunctionCallbackInfo<v8::Value>& Info)

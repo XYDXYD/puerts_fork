@@ -511,7 +511,8 @@ void FTypeScriptDeclarationGenerator::NamespaceEnd(UObject* Obj, FStringBuffer& 
 void FTypeScriptDeclarationGenerator::WriteOutput(UObject* Obj, const FStringBuffer& Buff)
 {
     const UPackage* Pkg = GetPackage(Obj);
-    if (Pkg && !Obj->IsNative() && BlueprintTypeDeclInfoCache.Find(Pkg->GetFName()))
+    bool IsPluginBPClass = Pkg && !Obj->IsNative() && !Pkg->GetName().StartsWith(TEXT("/Game/"));
+    if (Pkg && !Obj->IsNative() && !IsPluginBPClass && BlueprintTypeDeclInfoCache.Find(Pkg->GetFName()))
     {
         FStringBuffer Temp;
         Temp.Prefix = Output.Prefix;
@@ -521,7 +522,7 @@ void FTypeScriptDeclarationGenerator::WriteOutput(UObject* Obj, const FStringBuf
         BlueprintTypeDeclInfoCache[Pkg->GetFName()].NameToDecl.Add(Obj->GetFName(), Temp.Buffer);
         BlueprintTypeDeclInfoCache[Pkg->GetFName()].IsExist = true;
     }
-    else if (Obj->IsNative())
+    else if (Obj->IsNative() || IsPluginBPClass)
     {
         NamespaceBegin(Obj, Output);
         Output << Buff;
@@ -898,6 +899,27 @@ bool FTypeScriptDeclarationGenerator::GenFunction(
     }
     OwnerBuffer << "(";
     PropertyMacro* ReturnValue = nullptr;
+
+    TSet<FString> NameDeDupSet{};
+    auto const DeDup = [&NameDeDupSet](FString const& Name)
+    {
+        if (!NameDeDupSet.Contains(Name))
+        {
+            NameDeDupSet.Add(Name);
+            return Name;
+        }
+
+        int Cnt = 1;
+        FString NewName = FString::Printf(TEXT("%s_%d"), *Name, Cnt);
+        while (NameDeDupSet.Contains(NewName))
+        {
+            Cnt++;
+            NewName = FString::Printf(TEXT("%s_%d"), *Name, Cnt);
+        }
+
+        return NewName;
+    };
+
     TArray<UObject*> RefTypes;
     TArray<FString> ParamDecls;
     bool First = true;
@@ -928,7 +950,7 @@ bool FTypeScriptDeclarationGenerator::GenFunction(
                     DefaultValuePtr = MetaMap->Find(MetadataCppDefaultValueKey);
                 }
 
-                TmpBuf << SafeParamName(Property->GetName());
+                TmpBuf << DeDup(SafeParamName(Property->GetName()));
                 if (DefaultValuePtr)
                 {
                     TmpBuf << "?";

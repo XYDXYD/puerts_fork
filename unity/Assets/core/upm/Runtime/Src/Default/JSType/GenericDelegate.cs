@@ -353,9 +353,9 @@ namespace Puerts
 
         private void CheckLiveness(bool shouldThrow = true)
         {
-            if (nativeJsFuncPtr == IntPtr.Zero && shouldThrow)
+            if (nativeJsFuncPtr == IntPtr.Zero)
             {
-                throw new Exception("JsEnv has been disposed");
+                if (shouldThrow) throw new Exception("JsEnv has been disposed");
             } 
             else 
             {
@@ -365,6 +365,7 @@ namespace Puerts
 
         ~GenericDelegate() 
         {
+            if (nativeJsFuncPtr == IntPtr.Zero) return;
             CheckLiveness(false);
 #if THREAD_SAFE
             lock(jsEnv) {
