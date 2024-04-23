@@ -7,6 +7,7 @@
 #include "BackendEnv.h"
 #include "Log.h"
 #include "PromiseRejectCallback.hpp"
+#include "V8Utils.h"
 
 #pragma warning(push, 0)  
 #include "libplatform/libplatform.h"
@@ -662,11 +663,13 @@ v8::MaybeLocal<v8::Module> puerts::esmodule::_ResolveModule(
     
     std::string pathForDebug;
     maybeRet = CallRead(Isolate, Context, Specifier, pathForDebug);
-    if (maybeRet.IsEmpty()) 
+    v8::Local<v8::Value> ReadRet;
+    if (!maybeRet.ToLocal(&ReadRet) || !ReadRet->IsString()) 
     {
+        FV8Utils::ThrowException(Isolate, "Load Module Context fail!");
         return v8::MaybeLocal<v8::Module> {};
     }
-    v8::Local<v8::String> Code = v8::Local<v8::String>::Cast(maybeRet.ToLocalChecked());
+    v8::Local<v8::String> Code = v8::Local<v8::String>::Cast(ReadRet);
 
     v8::ScriptOrigin Origin(pathForDebug.size() == 0 ? 
         Specifier : 
