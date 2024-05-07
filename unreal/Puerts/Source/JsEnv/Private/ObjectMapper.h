@@ -19,9 +19,11 @@
 #include "v8.h"
 #pragma warning(pop)
 
+#include "NamespaceDef.h"
+
 #include <memory>
 
-namespace puerts
+namespace PUERTS_NAMESPACE
 {
 class ICppObjectMapper
 {
@@ -34,7 +36,7 @@ public:
     virtual v8::Local<v8::Value> FindOrAddCppObject(
         v8::Isolate* Isolate, v8::Local<v8::Context>& Context, const void* TypeId, void* Ptr, bool PassByPointer) = 0;
 
-    virtual bool IsInstanceOfCppObject(const void* TypeId, v8::Local<v8::Object> JsObject) = 0;
+    virtual bool IsInstanceOfCppObject(v8::Isolate* Isolate, const void* TypeId, v8::Local<v8::Object> JsObject) = 0;
 
     virtual std::weak_ptr<int> GetJsEnvLifeCycleTracker() = 0;
 
@@ -66,9 +68,6 @@ public:
 
     virtual void Merge(
         v8::Isolate* Isolate, v8::Local<v8::Context> Context, v8::Local<v8::Object> Src, UStruct* DesType, void* Des) = 0;
-
-    virtual void BindContainer(
-        void* Ptr, v8::Local<v8::Object> JSObject, void (*Callback)(const v8::WeakCallbackInfo<void>& data)) = 0;
 
     virtual void UnBindContainer(void* Ptr) = 0;
 
@@ -110,4 +109,4 @@ public:
 };
 #endif
 
-}    // namespace puerts
+}    // namespace PUERTS_NAMESPACE

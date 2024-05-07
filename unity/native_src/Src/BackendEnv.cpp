@@ -31,32 +31,6 @@
 #include <sys/types.h>
 #endif
 
-#else // !WITH_NODEJS
-
-#if defined(PLATFORM_WINDOWS)
-
-#if _WIN64
-#include "Blob/Win64/SnapshotBlob.h"
-#else
-#include "Blob/Win32/SnapshotBlob.h"
-#endif
-
-#elif defined(PLATFORM_ANDROID_ARM)
-#include "Blob/Android/armv7a/SnapshotBlob.h"
-#elif defined(PLATFORM_ANDROID_ARM64)
-#include "Blob/Android/arm64/SnapshotBlob.h"
-#elif defined(PLATFORM_ANDROID_x64)
-#include "Blob/Android/x64/SnapshotBlob.h"
-#elif defined(PLATFORM_MAC_ARM64)
-#include "Blob/macOS_arm64/SnapshotBlob.h"
-#elif defined(PLATFORM_MAC)
-#include "Blob/macOS/SnapshotBlob.h"
-#elif defined(PLATFORM_IOS)
-#include "Blob/iOS/arm64/SnapshotBlob.h"
-#elif defined(PLATFORM_LINUX)
-#include "Blob/Linux/SnapshotBlob.h"
-#endif // defined(PLATFORM_WINDOWS)
-
 #endif // WITH_NODEJS
 
 static std::unique_ptr<v8::Platform> GPlatform;
@@ -276,10 +250,6 @@ v8::Isolate* puerts::BackendEnv::CreateIsolate(void* external_quickjs_runtime)
 
     MainIsolate->SetMicrotasksPolicy(v8::MicrotasksPolicy::kAuto);
 #else
-    v8::StartupData SnapshotBlob;
-    SnapshotBlob.data = (const char *)SnapshotBlobCode;
-    SnapshotBlob.raw_size = sizeof(SnapshotBlobCode);
-    v8::V8::SetSnapshotDataBlob(&SnapshotBlob);
 
     // 初始化Isolate和DefaultContext
     CreateParams = new v8::Isolate::CreateParams();
@@ -351,7 +321,7 @@ void puerts::BackendEnv::InitInject(v8::Isolate* Isolate, v8::Local<v8::Context>
 
     NodeIsolateData = node::CreateIsolateData(Isolate, &NodeUVLoop, Platform, NodeArrayBufferAllocator.get()); // node::FreeIsolateData
 
-    NodeEnv = CreateEnvironment(NodeIsolateData, Context, *Args, *ExecArgs, node::EnvironmentFlags::kOwnsProcessState);
+    NodeEnv = CreateEnvironment(NodeIsolateData, Context, *Args, *ExecArgs, (node::EnvironmentFlags::Flags)(node::EnvironmentFlags::kOwnsProcessState | node::EnvironmentFlags::kNoRegisterESMLoader | node::EnvironmentFlags::kNoCreateInspector));
 
     Global->Set(Context, strConsole, Console).Check();
 
@@ -371,6 +341,7 @@ void puerts::BackendEnv::InitInject(v8::Isolate* Isolate, v8::Local<v8::Context>
 
 #if !WITH_QUICKJS
     Isolate->SetHostInitializeImportMetaObjectCallback(&puerts::esmodule::HostInitializeImportMetaObject);
+    Isolate->SetHostImportModuleDynamicallyCallback(&puerts::esmodule::DynamicImport);
 #endif
 
     Context->Global()->Set(Context, v8::String::NewFromUtf8(Isolate, "__tgjsSetPromiseRejectCallback").ToLocalChecked(), v8::FunctionTemplate::New(Isolate, &SetPromiseRejectCallback<puerts::BackendEnv>)->GetFunction(Context).ToLocalChecked()).Check();
@@ -509,10 +480,58 @@ static v8::MaybeLocal<v8::Value> CallRead(
 
     return maybeRet;
 }
+#if !WITH_QUICKJS
+v8::MaybeLocal<v8::Promise> puerts::esmodule::DynamicImport(
+    v8::Local<v8::Context> Context, 
+    v8::Local<v8::ScriptOrModule> Referrer,
+    v8::Local<v8::String> Specifier
+) 
+{
+    bool isFromCache;
+    v8::Local<v8::Value> ReferrerName = Referrer->GetResourceName();
+    
+    v8::TryCatch TryCatch(Context->GetIsolate());
+    v8::MaybeLocal<v8::Module> mod = puerts::esmodule::_ResolveModule(Context, Specifier, ReferrerName, isFromCache);
+
+    v8::Local<v8::Promise::Resolver> resolver;
+    if (!v8::Promise::Resolver::New(Context).ToLocal(&resolver)) return v8::MaybeLocal<v8::Promise> {};
+    
+    if (mod.IsEmpty())
+    {
+        resolver->Reject(Context, TryCatch.Exception());
+        return resolver->GetPromise();
+    }
+    v8::Local<v8::Module> moduleChecked = mod.ToLocalChecked();
+    if (!puerts::esmodule::LinkModule(Context, moduleChecked))
+    {
+        resolver->Reject(Context, TryCatch.Exception());
+        return resolver->GetPromise();
+    }
+    v8::Maybe<bool> ret = moduleChecked->InstantiateModule(Context, puerts::esmodule::ResolveModule);
+    if (ret.IsNothing() || !ret.ToChecked())
+    {
+        resolver->Reject(Context, TryCatch.Exception());
+        return resolver->GetPromise();
+    }
+    v8::MaybeLocal<v8::Value> evalRet = moduleChecked->Evaluate(Context);
+    if (evalRet.IsEmpty())
+    {
+        resolver->Reject(Context, TryCatch.Exception());
+        return resolver->GetPromise();
+    }
+
+    resolver->Resolve(Context, moduleChecked->GetModuleNamespace());
+
+    return resolver->GetPromise();
+}
+#endif
 
 void puerts::esmodule::ExecuteModule(const v8::FunctionCallbackInfo<v8::Value>& info) 
 {
     v8::Isolate* Isolate = info.GetIsolate();
+#ifdef THREAD_SAFE
+    v8::Locker Locker(Isolate);
+#endif
     v8::Isolate::Scope IsolateScope(Isolate);
     v8::HandleScope HandleScope(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
@@ -617,24 +636,12 @@ void puerts::esmodule::ExecuteModule(const v8::FunctionCallbackInfo<v8::Value>& 
 v8::MaybeLocal<v8::Module> puerts::esmodule::_ResolveModule(
     v8::Local<v8::Context> Context,
     v8::Local<v8::String> Specifier,
-    v8::Local<v8::Module> Referrer,
+    v8::Local<v8::Value> ReferrerName,
     bool& isFromCache
 )
 {
     v8::Isolate* Isolate = Context->GetIsolate();
-    BackendEnv* mm = (BackendEnv*)Isolate->GetData(1);
-
-    v8::Local<v8::Value> ReferrerName;
-    const auto referIter = mm->ScriptIdToPathMap.find(Referrer->ScriptId()); 
-    if (referIter != mm->ScriptIdToPathMap.end())
-    {
-        std::string referPath_std = referIter->second;
-        ReferrerName = v8::String::NewFromUtf8(Isolate, referPath_std.c_str()).ToLocalChecked();
-    }
-    else
-    {
-        ReferrerName = v8::String::NewFromUtf8(Isolate, "").ToLocalChecked();
-    }
+    BackendEnv* mm = BackendEnv::Get(Isolate);
 
     v8::MaybeLocal<v8::Value> maybeRet = CallResolver(Isolate, Context, Specifier, ReferrerName);
     if (maybeRet.IsEmpty()) 
@@ -685,9 +692,37 @@ v8::MaybeLocal<v8::Module> puerts::esmodule::_ResolveModule(
     {
         return v8::MaybeLocal<v8::Module> {};
     }
+#if V8_94_OR_NEWER
     mm->ScriptIdToPathMap[Module->ScriptId()] = Specifier_std;
+#else 
+    mm->ScriptIdToPathMap[Module->GetIdentityHash()] = Specifier_std;
+#endif
     mm->PathToModuleMap[Specifier_std] = v8::UniquePersistent<v8::Module>(Isolate, Module);
     return Module;
+}
+
+v8::Local<v8::Value> GetModuleName(
+    v8::Isolate* Isolate,
+    v8::Local<v8::Module> Referrer
+) 
+{
+    puerts::BackendEnv* mm = puerts::BackendEnv::Get(Isolate);
+    v8::Local<v8::Value> ReferrerName;
+#if V8_94_OR_NEWER
+    const auto referIter = mm->ScriptIdToPathMap.find(Referrer->ScriptId()); 
+#else 
+    const auto referIter = mm->ScriptIdToPathMap.find(Referrer->GetIdentityHash()); 
+#endif
+    if (referIter != mm->ScriptIdToPathMap.end())
+    {
+        std::string referPath_std = referIter->second;
+        ReferrerName = v8::String::NewFromUtf8(Isolate, referPath_std.c_str()).ToLocalChecked();
+    }
+    else
+    {
+        ReferrerName = v8::String::NewFromUtf8(Isolate, "").ToLocalChecked();
+    }
+    return ReferrerName;
 }
 
 v8::MaybeLocal<v8::Module> puerts::esmodule::ResolveModule(
@@ -696,8 +731,11 @@ v8::MaybeLocal<v8::Module> puerts::esmodule::ResolveModule(
     v8::Local<v8::Module> Referrer
 )
 {
+    v8::Isolate* Isolate = Context->GetIsolate();
     bool isFromCache = false;
-    return _ResolveModule(Context, Specifier, Referrer, isFromCache);
+    v8::Local<v8::Value> ReferrerName = GetModuleName(Isolate, Referrer);
+
+    return _ResolveModule(Context, Specifier, ReferrerName, isFromCache);
 }
 
 bool puerts::esmodule::LinkModule(
@@ -712,7 +750,7 @@ bool puerts::esmodule::LinkModule(
         v8::Local<v8::String> Specifier_v8 = RefModule->GetModuleRequest(i);
 
         bool isFromCache = false;
-        v8::MaybeLocal<v8::Module> MaybeModule = _ResolveModule(Context, Specifier_v8, RefModule, isFromCache);
+        v8::MaybeLocal<v8::Module> MaybeModule = _ResolveModule(Context, Specifier_v8, GetModuleName(Isolate, RefModule), isFromCache);
         if (MaybeModule.IsEmpty())
         {
             return false;
@@ -732,9 +770,13 @@ bool puerts::esmodule::LinkModule(
 void puerts::esmodule::HostInitializeImportMetaObject(v8::Local<v8::Context> Context, v8::Local<v8::Module> Module, v8::Local<v8::Object> meta)
 {
     v8::Isolate* Isolate = Context->GetIsolate();
-    BackendEnv* mm = (BackendEnv*)Isolate->GetData(1);
+    BackendEnv* mm = BackendEnv::Get(Isolate);
 
+#if V8_94_OR_NEWER
     auto iter = mm->ScriptIdToPathMap.find(Module->ScriptId());
+#else 
+    auto iter = mm->ScriptIdToPathMap.find(Module->GetIdentityHash());
+#endif
     if (iter != mm->ScriptIdToPathMap.end()) 
     {
         meta->CreateDataProperty(
@@ -752,7 +794,7 @@ char* puerts::esmodule::js_module_resolver(
 {
     JSRuntime *rt = JS_GetRuntime(ctx);
     v8::Isolate* Isolate = (v8::Isolate*)JS_GetRuntimeOpaque(rt);
-    BackendEnv* mm = (BackendEnv*)Isolate->GetData(1);
+    BackendEnv* mm = BackendEnv::Get(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
 
     v8::Local<v8::Value> Specifier = v8::String::NewFromUtf8(Isolate, name).ToLocalChecked();
@@ -789,7 +831,7 @@ JSModuleDef* puerts::esmodule::js_module_loader(
 {
     JSRuntime *rt = JS_GetRuntime(ctx);
     v8::Isolate* Isolate = (v8::Isolate*)JS_GetRuntimeOpaque(rt);
-    BackendEnv* mm = (BackendEnv*)Isolate->GetData(1);
+    BackendEnv* mm = BackendEnv::Get(Isolate);
     v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
     
     std::string name_std(name, strlen(name));

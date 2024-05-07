@@ -6,6 +6,39 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 you can get the english version change log at [Github Release](https://github.com/Tencent/puerts/releases)
 
+## [2.0.4] - 2024-01-09
+1. 修复：调用extension方法并且方法带out或者ref参数会报错
+2. 修复：将JSObject赋值为null会报错
+3. 修复：调用带默认参数的extension函数时index读取不正确的bug
+4. 修复：xil2cpp下，值类型无参构造字段为随机值的问题
+
+## [2.0.3] - 2023-11-02
+1. 重要：遵循Assetstore策略，生成菜单由PuerTS改到了Tools/PuerTS内
+2. 功能：支持dynamic import（即`import()`）#1540
+3. 修复：权限控制的一些bug #1512
+4. 修复：dts生成时关于interface的一些问题 #1541
+5. 修复：返回DateTime类型的函数dts错误的问题 #1565
+6. 修复：xil2cpp模式下对带params构造函数调用出错的问题 #1519
+7. 修复：xil2cpp模式下适配Thread::GetThreadStaticDataForThread参数变更 #1503
+8. 修复：xil2cpp模式下某些类生成出错的问题 #1520
+9. 修复：xil2cpp模式下调用结构体无参构造函数时导致的内存问题 #1563
+
+## [2.0.2] - 2023-09-07
+1. 修复：静态wrapper里params参数获取到的默认值不正确的问题 @ctxdegithub
+2. 修复：使用v8_8.4版本build的问题。unity2020及以下xil2cpp模式armv7可能需要v8_8.4才能编通 #1469
+3. 优化：xi2cpp模式下安卓平台合并v8和puerts两个库
+4. 优化：mac下改为使用universal binary，不再区分两个平台（覆盖升级时请注意删除旧Plugin）@mikejurka
+5. 优化：JsEnv现在会暴露Isolate字段，获得v8::Isolate的指针 @mingxxming
+6. 优化：去掉puerts自己的SnapshotBlob.h，直接使用v8内置的
+7. 优化：构建脚本现在可以运行在低版本node上 @xiezheng-XD #1495
+8. 优化：Linux平台自带inspector @geequlim
+
+## [2.0.1] - 2023-08-16
+1. 修复：内部类型在link.xml中声明不正确的问题 #1460
+2. 修复：xil2cpp模式下使用结构体out参数可能导致crash的问题 #1460
+3. 修复：xil2cpp模式下扩展函数获取默认参数不正确的问题 #1456
+4. 修复：JSObject没有正确调用回收的问题
+
 ## [2.0.0] - 2023-07-31
 1. 修复：debugpath失效并导致VSCode调试不可用的问题
 2. 修复：xil2cpp模式下`puer.$genericMethod`无法获取父类泛型函数的问题 #1417 @danij91
