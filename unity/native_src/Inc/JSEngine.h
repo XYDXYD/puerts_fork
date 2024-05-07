@@ -60,7 +60,7 @@ struct FLifeCycleInfo
     int Size;
 };
 
-v8::Local<v8::ArrayBuffer> NewArrayBuffer(v8::Isolate* Isolate, void *Ptr, size_t Size);
+v8::Local<v8::ArrayBuffer> NewArrayBuffer(v8::Isolate* Isolate, unsigned char *Ptr, size_t Size, size_t Count);
 
 enum JSEngineBackend
 {
