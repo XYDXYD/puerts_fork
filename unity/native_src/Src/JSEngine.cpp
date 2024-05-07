@@ -421,7 +421,8 @@ namespace puerts
 
         Global->Set(Context, FV8Utils::V8String(Isolate, Name), ToTemplate(Isolate, true, Callback, Data)->GetFunction(Context).ToLocalChecked()).Check();
     }
-
+    
+    // js构造对象
     static void NewWrap(const v8::FunctionCallbackInfo<v8::Value>& Info)
     {
         v8::Isolate* Isolate = Info.GetIsolate();
@@ -675,6 +676,14 @@ namespace puerts
         MainIsolate->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection);
 #endif
     }
+
+    void JSEngine::MemoryPressureNotification(v8::MemoryPressureLevel level)
+    {
+#ifndef WITH_QUICKJS
+        MainIsolate->MemoryPressureNotification(level);
+#endif
+    }
+
 
     void JSEngine::CreateInspector(int32_t Port)
     {    

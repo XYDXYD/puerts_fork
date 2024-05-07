@@ -68,6 +68,7 @@ V8_EXPORT void DestroyJSEngine(v8::Isolate *Isolate)
 V8_EXPORT void SetGlobalFunction(v8::Isolate *Isolate, const char *Name, CSharpFunctionCallback Callback, int64_t Data)
 {
     auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+    // data是env的索引+回调函数在callbacks数组的索引
     JsEngine->SetGlobalFunction(Name, Callback, Data);
 }
 
@@ -148,7 +149,11 @@ V8_EXPORT void RequestFullGarbageCollectionForTesting(v8::Isolate *Isolate)
     auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
     JsEngine->RequestFullGarbageCollectionForTesting();
 }
-
+V8_EXPORT void MemoryPressureNotification(v8::Isolate* Isolate, v8::MemoryPressureLevel level)
+{
+    auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+    JsEngine->MemoryPressureNotification(level);
+}
 
 V8_EXPORT void SetGeneralDestructor(v8::Isolate *Isolate, CSharpDestructorCallback GeneralDestructor)
 {
