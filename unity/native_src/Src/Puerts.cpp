@@ -403,13 +403,13 @@ V8_EXPORT const char* GetArrayBufferFromValue(v8::Isolate* Isolate, v8::Value *V
     }
 }
 
-V8_EXPORT void SetArrayBufferToOutValue(v8::Isolate* Isolate, v8::Value *Value, unsigned char *Bytes, int Length)
+V8_EXPORT void SetArrayBufferToOutValue(v8::Isolate* Isolate, v8::Value *Value, unsigned char *Bytes, int Length, int Offset)
 {
     if (Value->IsObject())
     {
         auto Context = Isolate->GetCurrentContext();
         auto Outer = Value->ToObject(Context).ToLocalChecked();
-        v8::Local<v8::ArrayBuffer> Ab = puerts::NewArrayBuffer(Isolate, Bytes, Length);
+        v8::Local<v8::ArrayBuffer> Ab = puerts::NewArrayBuffer(Isolate, Bytes, Length, Offset);
         auto ReturnVal = Outer->Set(Context, 0, Ab);
     }
 }
@@ -569,9 +569,9 @@ V8_EXPORT void ReturnBigInt(v8::Isolate* Isolate, const v8::FunctionCallbackInfo
     Info.GetReturnValue().Set(v8::BigInt::New(Isolate, BigInt));
 }
 
-V8_EXPORT void ReturnArrayBuffer(v8::Isolate* Isolate, const v8::FunctionCallbackInfo<v8::Value>& Info, unsigned char *Bytes, int Length)
+V8_EXPORT void ReturnArrayBuffer(v8::Isolate* Isolate, const v8::FunctionCallbackInfo<v8::Value>& Info, unsigned char *Bytes, int Length, int Offset)
 {
-    Info.GetReturnValue().Set(puerts::NewArrayBuffer(Isolate, Bytes, Length));
+    Info.GetReturnValue().Set(puerts::NewArrayBuffer(Isolate, Bytes, Length, Offset));
 }
 
 V8_EXPORT void ReturnBoolean(v8::Isolate* Isolate, const v8::FunctionCallbackInfo<v8::Value>& Info, int Bool)
@@ -648,7 +648,7 @@ V8_EXPORT void PushBigIntForJSFunction(JSFunction *Function, int64_t V)
     Function->Arguments.push_back(std::move(Value));
 }
 
-V8_EXPORT void PushArrayBufferForJSFunction(JSFunction *Function, unsigned char * Bytes, int Length)
+V8_EXPORT void PushArrayBufferForJSFunction(JSFunction *Function, unsigned char * Bytes, int Length, int Offset)
 {
     auto Isolate = Function->ResultInfo.Isolate;
 #ifdef THREAD_SAFE
@@ -660,7 +660,7 @@ V8_EXPORT void PushArrayBufferForJSFunction(JSFunction *Function, unsigned char 
     v8::Context::Scope ContextScope(Context);
     FValue Value;
     Value.Type = puerts::ArrayBuffer;
-    Value.Persistent.Reset(Isolate, puerts::NewArrayBuffer(Isolate, Bytes, Length));
+    Value.Persistent.Reset(Isolate, puerts::NewArrayBuffer(Isolate, Bytes, Length, Offset));
     Function->Arguments.push_back(std::move(Value));
 }
 

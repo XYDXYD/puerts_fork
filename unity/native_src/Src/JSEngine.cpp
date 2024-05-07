@@ -33,11 +33,11 @@ namespace puerts
         Info.GetReturnValue().Set(maybeRet.ToLocalChecked());
     }
 
-    v8::Local<v8::ArrayBuffer> NewArrayBuffer(v8::Isolate* Isolate, void *Ptr, size_t Size)
+    v8::Local<v8::ArrayBuffer> NewArrayBuffer(v8::Isolate* Isolate, unsigned char *Ptr, size_t Size, size_t Offset)
     {
         v8::Local<v8::ArrayBuffer> Ab = v8::ArrayBuffer::New(Isolate, Size);
         void* Buff = Ab->GetBackingStore()->Data();
-        ::memcpy(Buff, Ptr, Size);
+        ::memcpy(Buff, Ptr + Offset, Size);
         return Ab;
     }
 
