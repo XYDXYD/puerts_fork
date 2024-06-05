@@ -480,7 +480,7 @@ V8_EXPORT void SetNullToOutValue(v8::Isolate* Isolate, v8::Value *Value)
     {
         auto Context = Isolate->GetCurrentContext();
         auto Outer = Value->ToObject(Context).ToLocalChecked();
-        auto ReturnVal = Outer->Set(Context, 0, v8::Null(Isolate));
+        auto ReturnVal = Outer->Set(Context, 0, v8::Undefined(Isolate));
     }
 }
 

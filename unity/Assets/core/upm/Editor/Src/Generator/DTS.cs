@@ -63,7 +63,7 @@ namespace Puerts.Editor
                     {
                         Name = parameterInfo.Name,
                         IsByRef = parameterInfo.ParameterType.IsByRef,
-                        TypeName = Utils.GetTsTypeName(Utils.ToConstraintType(parameterInfo.ParameterType, isGenericTypeDefinition), isParams),
+                        TypeName = Utils.GetTsTypeName(Utils.ToConstraintType(parameterInfo.ParameterType, isGenericTypeDefinition), true, isParams),
                         IsParams = isParams,
                         IsOptional = parameterInfo.IsOptional
                     };
@@ -130,7 +130,7 @@ namespace Puerts.Editor
                         ParameterInfos = methodBase.GetParameters()
                             .Skip(skipExtentionMethodThis && Utils.isDefined(methodBase, typeof(ExtensionAttribute)) ? 1 : 0)
                             .Select(info => TsParameterGenInfo.FromParameterInfo(info, isGenericTypeDefinition)).ToArray(),
-                        TypeName = methodBase.IsConstructor ? "" : Utils.GetTsTypeName(Utils.ToConstraintType((methodBase as MethodInfo).ReturnType, isGenericTypeDefinition)),
+                        TypeName = methodBase.IsConstructor ? "" : Utils.GetTsTypeName(Utils.ToConstraintType((methodBase as MethodInfo).ReturnType, isGenericTypeDefinition), false),
                         IsConstructor = methodBase.IsConstructor,
                         IsStatic = methodBase.IsStatic,
                     };
@@ -159,6 +159,7 @@ namespace Puerts.Editor
 
                     return methods
                         .Select(m => TsMethodGenInfo.FromMethodBase(m, type.IsGenericTypeDefinition, false))
+                        .Where(m=>!LetronConfig.shouldIgnore(m.TypeName, m.Name))
                         .ToArray();
                 }
 
@@ -278,7 +279,7 @@ namespace Puerts.Editor
                             {
                                 Name = f.Name,
                                 Document = DocResolver.GetTsDocument(f),
-                                TypeName = Utils.GetTsTypeName(f.FieldType),
+                                TypeName = Utils.GetTsTypeName(f.FieldType, false),
                                 IsStatic = f.IsStatic
                             })
                             .Concat(
@@ -289,12 +290,13 @@ namespace Puerts.Editor
                                 {
                                     Name = p.Name,
                                     Document = DocResolver.GetTsDocument(p),
-                                    TypeName = Utils.GetTsTypeName(p.PropertyType),
+                                    TypeName = Utils.GetTsTypeName(p.PropertyType, false),
                                     IsStatic = Utils.IsStatic(p),
                                     HasGetter = p.GetGetMethod() != null && p.GetGetMethod().IsPublic,
                                     HasSetter = p.GetSetMethod() != null && p.GetSetMethod().IsPublic
                                 })
                             )
+                            .Where(m=>!LetronConfig.shouldIgnore(m.TypeName, m.Name))
                             .ToArray() : new TsPropertyGenInfo[] { },
                         IsGenericTypeDefinition = type.IsGenericTypeDefinition,
                         IsDelegate = (Utils.IsDelegate(type) && type != typeof(Delegate)),
@@ -350,7 +352,7 @@ namespace Puerts.Editor
                             if (!type.IsInterface && result.IsGenericTypeDefinition && interfaces[i].IsGenericType &&
                                 typeof(IEnumerable<>) == interfaces[i].GetGenericTypeDefinition())
                             {
-                                result.IteratorReturnName = Utils.GetTsTypeName(interfaces[i].GetGenericArguments()[0]);
+                                result.IteratorReturnName = Utils.GetTsTypeName(interfaces[i].GetGenericArguments()[0], true);
                             }
                             if (interfaces[i].IsNested)
                             {
@@ -649,11 +651,15 @@ namespace Puerts.Editor
                         }
                         info.Methods = selectMethods.ToArray();
                     }
-                    info.Methods = info.Methods.Distinct(new TsMethodGenInfoComparer()).ToArray();
+                    info.Methods = info.Methods.Distinct(new TsMethodGenInfoComparer()).Where(
+                        m=>!LetronConfig.shouldIgnore(m.TypeName, m.Name)).ToArray();
                 }
 
                 static void AddRefType(HashSet<Type> workTypes, HashSet<Type> refTypes, Type type)
                 {
+                    // TODO (WenX) 可以考虑加入新的filter规则
+                    if (type.Name == "TMPro_ExtensionMethods") return;
+                    
                     if (type.Name.StartsWith("<")) return;
                     if (workTypes.Contains(type)) return;
                     workTypes.Add(type);
