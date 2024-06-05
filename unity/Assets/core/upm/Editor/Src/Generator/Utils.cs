@@ -403,7 +403,7 @@ namespace Puerts.Editor
             }
 
             // #lizard forgives
-            public static string GetTsTypeName(Type type, bool isParams = false)
+            public static string GetTsTypeName(Type type, bool isParam = false, bool isParams = false)
             {
                 if (type == typeof(int))
                     return "number";
@@ -430,9 +430,17 @@ namespace Puerts.Editor
                 else if (type == typeof(double))
                     return "number";
                 else if (type == typeof(string))
+                {
+                    if (isParam)
+                    {
+                        return "string | undefined";
+                    }
                     return "string";
+                }
                 else if (type == typeof(void))
                     return "void";
+                else if (type == typeof(DateTime))
+                    return "Date";
                 else if (type == typeof(Puerts.ArrayBuffer))
                     return "ArrayBuffer";
                 else if (type == typeof(object))
@@ -444,20 +452,20 @@ namespace Puerts.Editor
                     return "$Task<any>";
 #endif
                 else if (type.IsByRef)
-                    return "$Ref<" + GetTsTypeName(type.GetElementType()) + ">";
+                    return "$Ref<" + GetTsTypeName(type.GetElementType(), isParam) + ">";
                 else if (type.IsArray)
-                    return isParams ? (GetTsTypeName(type.GetElementType()) + "[]") : ("System.Array$1<" + GetTsTypeName(type.GetElementType()) + ">");
+                    return isParams ? (GetTsTypeName(type.GetElementType(), isParam) + "[]") : ("System.Array$1<" + GetTsTypeName(type.GetElementType(), isParam) + ">");
                 else if (type.IsGenericType)
                 {
                     var underlyingType = Nullable.GetUnderlyingType(type);
                     if (underlyingType != null)
                     {
-                        return GetTsTypeName(underlyingType) + " | null";
+                        return GetTsTypeName(underlyingType, isParam) + " | undefined";
                     }
                     var fullName = type.FullName == null ? type.ToString() : type.FullName;
                     var parts = fullName.Replace('+', '.').Split('`');
                     var argTypenames = type.GetGenericArguments()
-                        .Select(x => GetTsTypeName(x)).ToArray();
+                        .Select(x => GetTsTypeName(x, isParam)).ToArray();
                     return parts[0] + '$' + parts[1].Split('[')[0] + "<" + string.Join(", ", argTypenames) + ">";
                 }
                 else if (type.FullName == null)

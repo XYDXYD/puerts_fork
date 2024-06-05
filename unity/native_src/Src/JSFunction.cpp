@@ -58,7 +58,7 @@ namespace puerts
         switch (Value.Type)
         {
         case NullOrUndefined:
-            return v8::Null(Isolate);
+            return v8::Undefined(Isolate);
         case BigInt:
             return v8::BigInt::New(Isolate, Value.BigInt);
         case Number:
