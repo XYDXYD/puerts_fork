@@ -586,7 +586,7 @@ V8_EXPORT void ReturnDate(v8::Isolate* Isolate, const v8::FunctionCallbackInfo<v
 
 V8_EXPORT void ReturnNull(v8::Isolate* Isolate, const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
-    Info.GetReturnValue().SetNull();
+    Info.GetReturnValue().SetUndefined();
 }
 
 V8_EXPORT void ReturnFunction(v8::Isolate* Isolate, const v8::FunctionCallbackInfo<v8::Value>& Info, JSFunction *Function)
