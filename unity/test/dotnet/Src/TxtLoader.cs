@@ -27,11 +27,6 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
 
     public bool FileExists(string specifier)
     {
-        if (nullFiles.Contains(specifier))
-        {
-            Console.WriteLine("FileExists return null for " + specifier);
-            return true;
-        }
         var res = !System.String.IsNullOrEmpty(Resolve(specifier, "."));
         return res;
     }
@@ -69,10 +64,6 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
 
     public string Resolve(string specifier, string referrer)
     {
-        if (nullFiles.Contains(specifier))
-        {
-            return specifier;
-        }
         if (PathHelper.IsRelative(specifier))
         {
             specifier = PathHelper.normalize(PathHelper.Dirname(referrer) + "/" + specifier);
@@ -87,11 +78,6 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
 
     public string ReadFile(string filepath, out string debugpath)
     {
-        if (nullFiles.Contains(filepath))
-        {
-            debugpath = string.Empty;
-            return null;
-        }
         debugpath = Path.Combine(root, filepath);
         if (File.Exists(Path.Combine(editorRoot, filepath)))
         {
@@ -118,12 +104,6 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
     public void AddMockFileContent(string fileName, string content)
     {
         mockFileContent.Add(fileName, content);
-    }
-    
-    private HashSet<string> nullFiles = new HashSet<string>();
-    public void AddNullFile(string fileName)
-    {
-        nullFiles.Add(fileName);
     }
 }
 

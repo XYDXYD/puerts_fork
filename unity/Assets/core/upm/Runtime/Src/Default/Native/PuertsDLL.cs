@@ -205,7 +205,7 @@ namespace Puerts
             {
                 throw new InvalidProgramException("eval null string");
             }
-            return Eval(isolate, Encoding.UTF8.GetBytes(code + '\0'), path);
+            return Eval(isolate, Encoding.UTF8.GetBytes(code), path);
         }
 #else
         [DllImport(DLLNAME, CallingConvention = CallingConvention.Cdecl)]
@@ -313,7 +313,7 @@ namespace Puerts
             else
             {
 #if PUERTS_GENERAL && !PUERTS_GENERAL_OSX
-                __ReturnString(isolate, info, Encoding.UTF8.GetBytes(str + '\0'));
+                __ReturnString(isolate, info, Encoding.UTF8.GetBytes(str));
 #else
                 __ReturnString(isolate, info, str);
 #endif
@@ -422,7 +422,7 @@ namespace Puerts
             }
             else
             {
-                SetStringToOutValue(isolate, value, Encoding.UTF8.GetBytes(str + '\0'));
+                SetStringToOutValue(isolate, value, Encoding.UTF8.GetBytes(str));
             }
         }
 #else
@@ -459,7 +459,7 @@ namespace Puerts
 
         public static void ThrowException(IntPtr isolate, string message)
         {
-            var bytes = Encoding.UTF8.GetBytes(message + '\0');
+            var bytes = Encoding.UTF8.GetBytes(message);
             ThrowException(isolate, bytes);
         }
 #else
