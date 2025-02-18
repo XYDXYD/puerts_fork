@@ -2,15 +2,15 @@ name: build osx unity plugin
 
 inputs:
   backend:
-    description: 'js backend'     
+    description: "js backend"
     required: true
   config:
     type: choice
     description: Release Or Debug
-    default: 'Release'
+    default: "Release"
     options:
-    - Release
-    - Debug
+      - Release
+      - Debug
   GITHUB_TOKEN:
     required:
 
@@ -25,7 +25,7 @@ runs:
         cd native_src
         node ../cli make --platform osx --backend ${{ inputs.backend }} --config ${{ inputs.config }}
     - name: Upload
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ./unity/Assets/core/upm/Plugins/**/*
         name: Unity_Plugins (${{ inputs.backend }}_${{ inputs.config }})
