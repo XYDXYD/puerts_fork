@@ -2,19 +2,19 @@ name: build windows unity plugin
 
 inputs:
   backend:
-    description: 'js backend'     
+    description: "js backend"
     required: true
   config:
     type: choice
     description: Release Or Debug
-    default: 'Release'
+    default: "Release"
     options:
-    - Release
-    - Debug
+      - Release
+      - Debug
   arch:
     type: choice
     description: building arch
-    default: 'auto'
+    default: "auto"
     options:
       - auto
       - x64
@@ -33,7 +33,7 @@ runs:
         cd native_src
         node ../cli make --platform win --backend ${{ inputs.backend }} --config ${{ inputs.config }} --arch ${{ inputs.arch }}
     - name: Upload
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         path: ./unity/Assets/core/upm/Plugins/**/*
         name: Unity_Plugins (${{ inputs.backend }}_${{ inputs.config }})
