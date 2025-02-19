@@ -1,9 +1,9 @@
 name: unity build plugins
 
-on: 
+on:
   workflow_dispatch:
   push:
-    paths: 
+    paths:
       - unity/native_src/**
       - unity/native_src_il2cpp/**
       - unity/cli/**
@@ -18,7 +18,7 @@ env:
 jobs:
   android:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v3
       - name: BuildAndroid
@@ -38,7 +38,7 @@ jobs:
           backend: nodejs_16
 
   ios:
-    runs-on: macos-11
+    runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v3
@@ -59,7 +59,7 @@ jobs:
           backend: nodejs_16
 
   osx:
-    runs-on: macos-11
+    runs-on: macos-latest
 
     steps:
       - uses: actions/checkout@v3
@@ -102,7 +102,7 @@ jobs:
 
   linux64:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v3
       - name: BuildLinux
