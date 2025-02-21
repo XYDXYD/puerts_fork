@@ -1,9 +1,9 @@
 name: unity unittest
 
-on: 
+on:
   workflow_dispatch:
   push:
-    paths: 
+    paths:
       - unity/Assets/**
       - unity/dotnet-test/**
       - unity/native_src/**
@@ -13,7 +13,7 @@ on:
       - unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.h
       - unreal/Puerts/Source/JsEnv/Private/PromiseRejectCallback.hpp
       - .github/workflows/unity-unittest.yml
-  
+
 env:
   RUNID: 613573412
 
@@ -26,9 +26,9 @@ jobs:
       - name: Setup Unity
         uses: ./.github/workflows/composites/unity-setup/
         with:
-          os: 'win'
-          version: '2021.3.16f1'
-          cachekey: '2021'
+          os: "win"
+          version: "2021.3.16f1"
+          cachekey: "2021"
           UNITY_USERNAME: ${{ secrets.UNITY_USERNAME }}
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
           UNITY_SERIAL: ${{ secrets.UNITY_SERIAL }}
@@ -46,21 +46,21 @@ jobs:
           echo "testresult in v1"
           cat log1.txt | grep "Failed\|Passed" 
           echo "testresult in v2"
-          cat log2.txt | grep "Failed\|Passed" 
+          cat log2.txt | grep "Failed\|Passed"
   unittest-win-dotnet:
     runs-on: windows-2019
 
     steps:
       - uses: actions/setup-dotnet@v3
         with:
-          dotnet-version: '6.x.x'
+          dotnet-version: "6.x.x"
       - uses: actions/checkout@v3
       - name: UnitTest-v8
         run: |
           cd unity
           npm i
           cd test/dotnet
-          node ../../cli dotnet-test v8_9.4
+          node ../../cli dotnet-test v8_9.4.146.24
       - name: UnitTest-nodejs
         run: |
           cd unity/test/dotnet
@@ -69,26 +69,26 @@ jobs:
         run: |
           cd unity/test/dotnet
           node ../../cli dotnet-test quickjs
-          
+
   unittest-osx-dotnet:
     runs-on: macos-latest
 
     steps:
       - uses: actions/setup-dotnet@v3
         with:
-          dotnet-version: '6.x.x'
+          dotnet-version: "6.x.x"
       - uses: actions/checkout@v3
       - name: UnitTest-v8
         run: |
           cd unity
           npm i
           cd test/dotnet
-          node ../../cli dotnet-test v8_9.4
+          node ../../cli dotnet-test v8_9.4.146.24
       - name: UnitTest-nodejs
         run: |
           cd unity/test/dotnet
           node ../../cli dotnet-test nodejs_16
-          
+
       - name: UnitTest-quickjs
         run: |
           cd unity/test/dotnet

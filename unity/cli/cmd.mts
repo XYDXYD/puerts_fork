@@ -2,8 +2,8 @@ import { rm, setWinCMDEncodingToUTF8 } from "@puerts/shell-util";
 import { Option, program } from "commander";
 import { join } from "path";
 import downloadBackend from "./backend.mjs";
-import { dotnetTest, unityTest } from "./test.mjs";
 import runPuertsMake, { makeOSXUniveralBinary, platformCompileConfig } from "./make.mjs";
+import { dotnetTest, unityTest } from "./test.mjs";
 
 setWinCMDEncodingToUTF8();
 
@@ -30,7 +30,7 @@ program
             .default("Release")
             .choices(["Release", "Debug"])
     )
-    .option("--backend <backend>", "the JS backend will be used", "v8_9.4")
+    .option("--backend <backend>", "the JS backend will be used", "v8_9.4.146.24")
     .action(function (quickcommand, options) {
         let backend = options.backend;
         let config = options.config;
@@ -40,7 +40,7 @@ program
         if (quickcommand) {
             switch (quickcommand[0]) {
                 case 'v':
-                    backend = 'v8_9.4'; break;
+                    backend = 'v8_9.4.146.24'; break;
                 case 'n':
                     backend = 'nodejs_16'; break;
                 case 'q':
