@@ -122,7 +122,7 @@ export async function dotnetTest(cwd: string, backend: string, filter: string = 
     const copyConfig = await runPuertsMake(join(cwd, '../../native_src'), {
         platform: process.platform == 'win32' ? 'win' : 'osx',
         config: "Debug",
-        backend: backend || 'v8_9.4',
+        backend: backend || 'v8_9.4.146.24',
         arch: process.arch as any
     })
 
