@@ -225,7 +225,7 @@ namespace puerts
     {
         if (ModuleExecutor == nullptr)
         {
-            bool success = Eval(ExecuteModuleJSCode, "__puer_execute__.mjs");
+            bool success = _Eval(ExecuteModuleJSCode, "__puer_execute__.mjs");
             if (!success) return nullptr;
             
             v8::Isolate::Scope IsolateScope(MainIsolate);
@@ -240,7 +240,13 @@ namespace puerts
         return ModuleExecutor;
     }
 
-    bool JSEngine::Eval(const char *Code, const char* Path)
+    bool JSEngine::Eval(const char* Code, const char* Path)
+    {
+        m_evals.insert(Code);
+        return true;
+    }
+
+    bool JSEngine::_Eval(const char *Code, const char* Path)
     {
         v8::Isolate* Isolate = MainIsolate;
 #ifdef THREAD_SAFE
@@ -276,6 +282,12 @@ namespace puerts
 
         return true;
     }
+
+    bool JSEngine::EvalApp()
+    {
+        return _Eval("const _m = require('main'); _m.default", nullptr);
+    }
+
 
     JSObject *JSEngine::CreateJSObject(v8::Isolate *InIsolate, v8::Local<v8::Context> InContext, v8::Local<v8::Object> InObject)
     {

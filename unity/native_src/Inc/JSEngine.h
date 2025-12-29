@@ -82,7 +82,11 @@ public:
 
     void SetGlobalFunction(const char *Name, CSharpFunctionCallback Callback, int64_t Data);
 
+    std::set<std::string> m_evals;
+    std::string m_evals_str;
     bool Eval(const char *Code, const char* Path);
+
+    bool EvalApp();
 
     int RegisterClass(const char *FullName, int BaseTypeId, CSharpConstructorCallback Constructor, CSharpDestructorCallback Destructor, int64_t Data, int Size);
 
@@ -151,6 +155,8 @@ public:
     puerts::BackendEnv BackendEnv;
     
 private:
+    bool _Eval(const char* Code, const char* Path);
+
     std::vector<FCallbackInfo*> CallbackInfos;
 
     std::vector<FLifeCycleInfo*> LifeCycleInfos;

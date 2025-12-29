@@ -92,6 +92,40 @@ V8_EXPORT FResultInfo * Eval(v8::Isolate *Isolate, const char *Code, const char*
     }
 }
 
+V8_EXPORT FResultInfo* EvalApp(v8::Isolate* Isolate)
+{
+    auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+    if (JsEngine->EvalApp())
+    {
+        return &(JsEngine->ResultInfo);
+    }
+    else
+    {
+        return nullptr;
+    }
+}
+
+V8_EXPORT const char* CheckEval(v8::Isolate* Isolate, int* Length)
+{
+    auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+
+    const char* Separator = "~~~~~~~~~";
+    JsEngine->m_evals_str.clear();
+    bool First = true;
+    for (const auto& Str : JsEngine->m_evals)
+    {
+        if (!First)
+        {
+            JsEngine->m_evals_str += Separator;
+        }
+        JsEngine->m_evals_str += Str;
+        First = false;
+    }
+    JsEngine->m_evals.clear();
+    *Length = static_cast<int>(JsEngine->m_evals_str.length());
+    return JsEngine->m_evals_str.c_str();
+}
+
 V8_EXPORT bool ClearModuleCache(v8::Isolate *Isolate, const char* Path)
 {
     auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
