@@ -117,7 +117,10 @@ const platformCompileConfig = {
                 cd("..")
                 assert.equal(0, exec(`cmake --build ${CMAKE_BUILD_PATH} --config ${options.config}`).code)
 
-                return `${CMAKE_BUILD_PATH}/${options.config}/${cmakeAddedLibraryName}.dll`
+                return [
+                    `${CMAKE_BUILD_PATH}/${options.config}/${cmakeAddedLibraryName}.dll`,
+                    `${CMAKE_BUILD_PATH}/${options.config}/${cmakeAddedLibraryName}.pdb`
+                ]
             }
         },
         'ia32': {
@@ -128,7 +131,10 @@ const platformCompileConfig = {
                 cd("..")
                 assert.equal(0, exec(`cmake --build ${CMAKE_BUILD_PATH} --config ${options.config}`).code)
 
-                return `${CMAKE_BUILD_PATH}/${options.config}/${cmakeAddedLibraryName}.dll`
+                return [
+                    `${CMAKE_BUILD_PATH}/${options.config}/${cmakeAddedLibraryName}.dll`,
+                    `${CMAKE_BUILD_PATH}/${options.config}/${cmakeAddedLibraryName}.pdb`
+                ]
             }
         }
     },
