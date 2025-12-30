@@ -82,6 +82,7 @@ V8_EXPORT void SetModuleResolver(v8::Isolate *Isolate, CSharpModuleResolveCallba
 V8_EXPORT FResultInfo * Eval(v8::Isolate *Isolate, const char *Code, const char* Path)
 {
     auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+#if defined(WITHOUT_INSPECTOR)
     if (JsEngine->Eval(Code, Path))
     {
         return &(JsEngine->ResultInfo);
@@ -90,6 +91,16 @@ V8_EXPORT FResultInfo * Eval(v8::Isolate *Isolate, const char *Code, const char*
     {
         return nullptr;
     }
+#else
+    if (JsEngine->_Eval(Code, Path))
+    {
+        return &(JsEngine->ResultInfo);
+    }
+    else
+    {
+        return nullptr;
+    }
+#endif
 }
 
 V8_EXPORT FResultInfo* EvalApp(v8::Isolate* Isolate)

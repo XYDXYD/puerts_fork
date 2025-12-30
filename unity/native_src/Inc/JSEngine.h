@@ -153,9 +153,10 @@ public:
     int32_t Idx;
 
     puerts::BackendEnv BackendEnv;
+
+    inline bool _Eval(const char* Code, const char* Path);
     
 private:
-    bool _Eval(const char* Code, const char* Path);
 
     std::vector<FCallbackInfo*> CallbackInfos;
 
